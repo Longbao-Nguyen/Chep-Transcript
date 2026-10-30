@@ -2,9 +2,13 @@ import { requireUser } from '../server/auth/session.js';
 import { getRepositories } from '../server/db/index.js';
 import { jsonResponse, route } from '../server/http/responses.js';
 import { toClientJob } from '../server/jobs/public.js';
+import { getKaggleAvailability } from '../server/kaggle/availability.js';
 
 export const GET = route(async (request) => {
   const user = await requireUser(request);
+  if (new URL(request.url).searchParams.get('view') === 'kaggle-status') {
+    return jsonResponse(getKaggleAvailability());
+  }
   const repositories = await getRepositories();
   const jobs = await repositories.jobs.listForUser(user.id, { activeAndRecent: true, limit: 100 });
   const [queueState, queuedCount] = await Promise.all([

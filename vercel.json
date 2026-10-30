@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/kaggle/status",
+      "destination": "/api/jobs?view=kaggle-status"
+    },
+    {
       "source": "/api/auth/:path*",
       "destination": "/api/auth/[...auth]"
     },

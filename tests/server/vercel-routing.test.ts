@@ -44,3 +44,11 @@ test('Vercel backend uses Node ESM-resolvable relative import specifiers', () =>
     }
   }
 });
+
+test('Kaggle status reuses the jobs function and the deployment stays within twelve functions', () => {
+  const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8')) as VercelConfig;
+  assert.deepEqual(config.rewrites?.find(({ source }) => source === '/api/kaggle/status'), {
+    source: '/api/kaggle/status', destination: '/api/jobs?view=kaggle-status',
+  });
+  assert.ok(findTypeScriptFiles(fileURLToPath(new URL('../../api', import.meta.url))).length <= 12);
+});

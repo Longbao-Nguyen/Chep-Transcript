@@ -2,6 +2,9 @@ node_modules/
 build/
 dist/
 coverage/
+test-results/
+# Documentation stays local; do not publish Markdown to GitHub.
+*.[mM][dD]
 .DS_Store
 *.log
 .env*

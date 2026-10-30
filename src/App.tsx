@@ -1,13 +1,18 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { AudioLines, History, ShieldCheck } from 'lucide-react';
 
 import { AppHeader } from './features/auth/AppHeader';
 import { SignInCard } from './features/auth/SignInCard';
 import { useSession } from './features/auth/useSession';
 import { CompletedJobs } from './features/jobs/CompletedJobs';
 import { CurrentJobs } from './features/jobs/CurrentJobs';
-import { useJobsPolling } from './features/jobs/useJobsPolling';
+import { isActiveJob, useJobsPolling } from './features/jobs/useJobsPolling';
 import { MultiFileUploadPanel } from './features/upload/MultiFileUploadPanel';
 import { uploadFileDirectly } from './features/upload/uploadFile';
+import { KaggleConnection } from './features/kaggle/KaggleConnection';
+import { useKaggleStatus } from './features/kaggle/useKaggleStatus';
+import { UserGuide } from './features/guide/UserGuide';
+import { CancelJobDialog } from './features/jobs/CancelJobDialog';
 import type { ClientJob, LocalUpload } from './types';
 
 function createLocalUpload(file: File): LocalUpload {
@@ -28,6 +33,12 @@ export default function App() {
   const [confirmJob, setConfirmJob] = useState<ClientJob | null>(null);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'transcribe' | 'history'>('transcribe');
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const startLock = useRef(false);
+  const kaggle = useKaggleStatus(Boolean(session));
 
   const cancelJob = useCallback(async (job: ClientJob) => {
     setConfirmJob(null);
@@ -46,6 +57,9 @@ export default function App() {
   }, [refresh]);
 
   const startQueue = useCallback(async () => {
+    if (startLock.current) return;
+    startLock.current = true;
+    setStarting(true);
     setActionError(null);
     try {
       const response = await fetch('/api/queue/start', { method: 'POST', credentials: 'same-origin' });
@@ -54,6 +68,9 @@ export default function App() {
       await refresh();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Could not start transcription.');
+    } finally {
+      startLock.current = false;
+      setStarting(false);
     }
   }, [refresh]);
 
@@ -105,15 +122,30 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f3f6fa] text-slate-800 font-sans antialiased">
-      <AppHeader user={session.user} />
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-        <MultiFileUploadPanel onFiles={handleFiles} />
+    <div className="min-h-screen bg-[#f7f8f5] text-slate-800 font-sans antialiased lg:flex">
+      <aside className="bg-[#172e28] p-6 text-white lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:overflow-y-auto">
+        <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl border border-white/20 text-emerald-100"><AudioLines size={24} /></span><div><p className="text-lg font-semibold">French Transcript</p><p className="text-xs text-emerald-100/60">Web workspace</p></div></div>
+        <nav aria-label="Workspace navigation" className="mt-8 flex gap-2 lg:grid">
+          <button type="button" aria-current={tab === 'transcribe' ? 'page' : undefined} onClick={() => setTab('transcribe')} className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-3 text-sm ${tab === 'transcribe' ? 'bg-[#2c4439] text-white' : 'text-emerald-100/70 hover:bg-white/5'}`}><AudioLines size={18} /> Transcribe <span className="ml-auto text-xs">{queuedCount}</span></button>
+          <button type="button" aria-current={tab === 'history' ? 'page' : undefined} onClick={() => setTab('history')} className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-3 text-sm ${tab === 'history' ? 'bg-[#2c4439] text-white' : 'text-emerald-100/70 hover:bg-white/5'}`}><History size={18} /> History <span className="ml-auto text-xs">{jobs.filter((job) => !isActiveJob(job)).length}</span></button>
+        </nav>
+        <button type="button" aria-expanded={connectionOpen} aria-controls="kaggle-panel" onClick={() => setConnectionOpen((open) => !open)} className="mt-4 flex w-full items-center justify-between rounded-lg border border-white/15 px-3 py-2 text-xs text-emerald-100 lg:hidden"><span>Kaggle connection</span><span>{connectionOpen ? 'Hide details' : 'Show setup'}</span></button>
+        <div id="kaggle-panel" className={`${connectionOpen ? 'block' : 'hidden'} lg:block`}><KaggleConnection status={kaggle.status} loading={kaggle.loading} error={kaggle.error} onRefresh={() => void kaggle.refresh()} /></div>
+        <p className="mt-8 hidden items-center gap-2 border-t border-white/15 pt-5 text-xs text-emerald-100/70 lg:flex"><ShieldCheck size={14} /> Private files · Google sign-in</p>
+      </aside>
+      <div className="min-w-0 flex-1">
+      <AppHeader user={session.user} page={tab === 'transcribe' ? 'Transcribe' : 'History'} onGuide={() => setGuideOpen(true)} />
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-8">
         {(jobsError || sessionError || actionError) && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {jobsError || sessionError || actionError}
           </div>
         )}
+        {tab === 'transcribe' ? <>
+        <div><h1 className="text-2xl font-semibold text-[#233c34]">Your recordings, ready to transcribe.</h1><p className="mt-2 text-sm text-slate-500">Add files to your private queue and keep track of every transcript.</p></div>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="min-w-0 space-y-6">
+        <MultiFileUploadPanel onFiles={handleFiles} />
         <CurrentJobs
           jobs={jobs}
           uploads={uploads}
@@ -121,24 +153,24 @@ export default function App() {
           queueState={queueState}
           queuedCount={queuedCount}
           cancellingJobId={cancellingJobId}
+          starting={starting}
+          workerReady={false}
           onCancel={(job) => job.status === 'QUEUED' ? void cancelJob(job) : setConfirmJob(job)}
           onStart={() => void startQueue()}
           onDismissUpload={dismissUpload}
         />
-        <CompletedJobs jobs={jobs} />
-      </main>
-      {confirmJob && (
-        <div role="presentation" className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="cancel-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h2 id="cancel-title" className="text-lg font-bold text-slate-900">Cancel current transcription?</h2>
-            <p className="mt-3 text-sm text-slate-600">This will stop the current file and pause the remaining queue. Queued files will not be deleted.</p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setConfirmJob(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">Keep processing</button>
-              <button type="button" onClick={() => void cancelJob(confirmJob)} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white">Cancel and pause queue</button>
-            </div>
-          </div>
+        {jobs.some((job) => job.status === 'COMPLETED') && <button type="button" onClick={() => setTab('history')} className="flex w-full items-center justify-between rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-900"><span>Completed transcripts are in History</span><History size={18} /></button>}
         </div>
-      )}
+        <aside className="space-y-5">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-xs font-semibold tracking-wider text-slate-500">PROCESSING DEVICE</h2><p className="mt-4 font-semibold text-[#233c34]">Online GPU · Kaggle</p><p className="mt-2 text-sm leading-6 text-slate-500">Processing will use your own Kaggle account. GPU access has not been checked.</p><p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">Online processing is being prepared. Upload and queue management are available now.</p></section>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5"><h2 className="text-xs font-semibold tracking-wider text-slate-500">TRANSCRIPTION MODEL</h2><p className="mt-4 font-semibold text-[#233c34]">French</p><p className="mt-2 text-sm leading-6 text-slate-500">Whisper large-v3 French, distilled. French is the planned language for this web release.</p><p className="mt-4 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-500">Once available, long recordings will be split across two notebooks and combined into one transcript.</p></section>
+        </aside>
+        </div>
+        </> : <CompletedJobs jobs={jobs} />}
+      </main>
+      </div>
+      {confirmJob && <CancelJobDialog job={confirmJob} onClose={() => setConfirmJob(null)} onConfirm={() => void cancelJob(confirmJob)} />}
+      {guideOpen && <UserGuide onClose={() => setGuideOpen(false)} />}
     </div>
   );
 }
