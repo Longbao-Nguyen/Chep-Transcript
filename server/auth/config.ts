@@ -43,6 +43,12 @@ export function getAuthConfig(): AuthConfig {
         }
         return token;
       },
+      async session({ session, token }) {
+        if (session.user && typeof token.appUserId === 'string') {
+          Object.assign(session.user, { id: token.appUserId });
+        }
+        return session;
+      },
     },
   };
 }

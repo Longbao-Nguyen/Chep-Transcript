@@ -9,18 +9,9 @@ import {
 
 export const GET = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
-  if (url.pathname.endsWith('/guest/reset')) {
-    return new Response(null, {
-      status: 303,
-      headers: {
-        location: '/',
-        'set-cookie': 'chep_anon_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax',
-        'cache-control': 'no-store',
-      },
-    });
-  }
   if (url.pathname.endsWith('/session')) {
     const authResponse = await handleAuthRequest(request);
+    if (!authResponse.ok) return authResponse;
     const contentType = authResponse.headers.get('content-type') || '';
     if (authResponse.ok && contentType.includes('application/json')) {
       try {
@@ -75,4 +66,20 @@ export const GET = async (request: Request): Promise<Response> => {
   return handleAuthRequest(request);
 };
 
-export const POST = handleAuthRequest;
+export const POST = async (request: Request): Promise<Response> => {
+  const url = new URL(request.url);
+  if (url.pathname.endsWith('/guest/reset')) {
+    const origin = request.headers.get('origin');
+    if (!origin || origin !== url.origin) {
+      return new Response(null, { status: 403, headers: { 'cache-control': 'no-store' } });
+    }
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'set-cookie': 'chep_anon_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax',
+        'cache-control': 'no-store',
+      },
+    });
+  }
+  return handleAuthRequest(request);
+};

@@ -21,6 +21,13 @@ test('Auth.js is configured for Google and serves CSRF-protected actions', async
     const provider = typeof config.providers[0] === 'function' ? config.providers[0]() : config.providers[0];
     assert.equal(config.basePath, '/api/auth');
     assert.equal(config.session?.strategy, 'jwt');
+    const sessionCallback = config.callbacks?.session;
+    assert.equal(typeof sessionCallback, 'function');
+    const session = await sessionCallback!({
+      session: { user: { email: 'user@example.com' }, expires: '2030-01-01T00:00:00.000Z' },
+      token: { appUserId: 'usr_google_test' },
+    } as unknown as Parameters<NonNullable<typeof sessionCallback>>[0]);
+    assert.equal((session.user as { id?: string }).id, 'usr_google_test');
     assert.equal(provider.id, 'google');
     const response = await handleAuthRequest(new Request('http://localhost:3000/api/auth/csrf'));
     const payload = await response.json() as { csrfToken?: string };

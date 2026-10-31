@@ -3,6 +3,8 @@ build/
 dist/
 coverage/
 test-results/
+__pycache__/
+*.pyc
 # Documentation stays local; do not publish Markdown to GitHub.
 *.[mM][dD]
 .DS_Store

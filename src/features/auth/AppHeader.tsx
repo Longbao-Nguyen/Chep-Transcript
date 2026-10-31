@@ -60,6 +60,7 @@ export function AppHeader({
   const [modelDropdownOpen, setModelDropdownOpen] = useState(
     () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('model_open') === '1',
   );
+  const [authError, setAuthError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeModel =
@@ -170,11 +171,11 @@ export function AppHeader({
           </button>
 
           {user.id.startsWith('usr_anon_') ? (
-            <button type="button" onClick={() => void signInWithGoogle()} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+            <button type="button" onClick={() => void signInWithGoogle().catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'Could not sign in.'))} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
               Sign in with Google
             </button>
           ) : (
-            <button type="button" onClick={() => void signOut()} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
+            <button type="button" onClick={() => void signOut().catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'Could not sign out.'))} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
               Sign out
             </button>
           )}
@@ -182,7 +183,7 @@ export function AppHeader({
           {/* Reset / New Session */}
           {user.id.startsWith('usr_anon_') && <button
             type="button"
-            onClick={() => resetSession()}
+            onClick={() => void resetSession().catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'Could not reset session.'))}
             className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 cursor-pointer"
             title="Start a new guest session"
             aria-label="Reset session"
@@ -191,6 +192,7 @@ export function AppHeader({
           </button>}
         </div>
       </div>
+      {authError && <p role="alert" className="mx-auto max-w-6xl pt-2 text-xs text-red-700">{authError}</p>}
     </header>
   );
 }

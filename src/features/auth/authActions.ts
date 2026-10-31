@@ -26,6 +26,13 @@ export function signOut(): Promise<void> {
   return submitAuthAction('/api/auth/signout');
 }
 
-export function resetSession(): void {
-  window.location.assign('/api/auth/guest/reset');
+export async function resetSession(): Promise<void> {
+  const response = await fetch('/api/auth/guest/reset', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  });
+  if (!response.ok) throw new Error('Could not start a new guest session.');
+  window.location.reload();
 }
