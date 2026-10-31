@@ -15,17 +15,35 @@ export function useSession(): SessionState {
     const controller = new AbortController();
     fetch('/api/auth/session', { credentials: 'same-origin', signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) throw new Error('Could not load your sign-in session.');
-        const payload = await response.json() as Partial<AppSession> | null;
-        setState({
-          session: payload?.user?.email ? payload as AppSession : null,
-          loading: false,
-          error: null,
-        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('application/json')) {
+          const payload = (await response.json()) as Partial<AppSession> | null;
+          if (payload?.user?.id && payload?.user?.email) {
+            setState({
+              session: {
+                user: {
+                  id: payload.user.id,
+                  name: payload.user.name || 'Guest',
+                  email: payload.user.email,
+                },
+                expires: payload.expires || new Date(Date.now() + 7 * 86400000).toISOString(),
+              },
+              loading: false,
+              error: null,
+            });
+            return;
+          }
+        }
+
+        throw new Error('Could not create a secure session. Please try again.');
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
-        setState({ session: null, loading: false, error: error instanceof Error ? error.message : 'Session failed.' });
+        setState({
+          session: null,
+          loading: false,
+          error: error instanceof Error ? error.message : 'Could not create a secure session.',
+        });
       });
     return () => controller.abort();
   }, []);

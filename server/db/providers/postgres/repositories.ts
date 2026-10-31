@@ -94,6 +94,19 @@ class PostgresUserRepository implements UserRepository {
     `;
     return mapUser(rows[0] as Row);
   }
+
+  async getOrCreateAnonymousUser(id: string): Promise<User> {
+    const email = `${id}@anonymous.chep.local`;
+    const googleSubject = `anon:${id}`;
+    const rows = await this.sql`
+      insert into users (id, email, google_subject, display_name, image_url)
+      values (${id}, ${email}, ${googleSubject}, 'Anonymous Guest', null)
+      on conflict (id) do update set
+        updated_at = now()
+      returning *
+    `;
+    return mapUser(rows[0] as Row);
+  }
 }
 
 const PATCH_COLUMNS: Record<keyof JobPatch, string> = {
@@ -233,7 +246,7 @@ class PostgresJobRepository implements JobRepository {
       if (queueRows[0]?.state !== 'RUNNING') return null;
       const rows = await transaction`
         update jobs set status = 'COMPLETED', output_object_key = ${outputObjectKey},
-          progress = 1, completed_at = now(), updated_at = now()
+          progress = 1, completed_at = now(), expires_at = now() + interval '7 days', updated_at = now()
         where id = ${jobId} and user_id = ${userId} and worker_run_id = ${workerRunId}
           and status = 'FINALIZING'
         returning *

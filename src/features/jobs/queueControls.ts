@@ -5,6 +5,6 @@ export function queueStartControl(state: QueueState, queuedCount: number, starti
   if (state === 'PAUSING') return { disabled: true, label: 'Stopping…', reason: 'Wait for the current transcription to stop.' };
   if (state === 'RUNNING') return { disabled: true, label: 'Running', reason: 'Files are processed one at a time.' };
   if (queuedCount === 0) return { disabled: true, label: 'Start', reason: 'Add a file to the queue first.' };
-  if (!workerReady) return { disabled: true, label: state === 'PAUSED' ? 'Resume queue' : 'Start', reason: 'Online GPU is not ready. Your uploaded files will stay in the queue.' };
+  if (!workerReady) return { disabled: true, label: state === 'PAUSED' ? 'Resume queue' : 'Start', reason: 'Online GPU processing is not available yet.' };
   return { disabled: false, label: state === 'PAUSED' ? 'Resume queue' : 'Start', reason: 'Start processing queued files in order.' };
 }

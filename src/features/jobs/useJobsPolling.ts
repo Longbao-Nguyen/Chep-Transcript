@@ -28,8 +28,11 @@ export function useJobsPolling(enabled: boolean) {
     if (!enabled) return;
     try {
       const response = await fetch('/api/jobs', { credentials: 'same-origin' });
-      if (!response.ok) throw new Error(response.status === 401 ? 'Your session has expired.' : 'Could not load jobs.');
-      const payload = await response.json() as { jobs: ClientJob[]; queueState: QueueState; queuedCount: number };
+      const contentType = response.headers.get('content-type') || '';
+      if (!response.ok || !contentType.includes('application/json')) {
+        throw new Error(response.status === 401 ? 'Your session has expired.' : 'Could not load jobs.');
+      }
+      const payload = (await response.json()) as { jobs: ClientJob[]; queueState: QueueState; queuedCount: number };
       setJobs(payload.jobs);
       setQueueState(payload.queueState);
       setQueuedCount(payload.queuedCount);
@@ -58,7 +61,7 @@ export function useJobsPolling(enabled: boolean) {
     if (!enabled || delay == null) return;
     const timer = window.setTimeout(() => void refresh(), delay);
     return () => window.clearTimeout(timer);
-  }, [delay, enabled, jobs, refresh]);
+  }, [delay, enabled, refresh]);
 
   return { jobs, queueState, queuedCount, loading, error, refresh };
 }

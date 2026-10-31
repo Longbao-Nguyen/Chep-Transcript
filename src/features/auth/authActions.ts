@@ -1,7 +1,7 @@
 async function submitAuthAction(path: string): Promise<void> {
   const csrfResponse = await fetch('/api/auth/csrf', { credentials: 'same-origin' });
   if (!csrfResponse.ok) throw new Error('Authentication is not configured yet.');
-  const { csrfToken } = await csrfResponse.json() as { csrfToken?: string };
+  const { csrfToken } = (await csrfResponse.json()) as { csrfToken?: string };
   if (!csrfToken) throw new Error('Could not start a secure authentication request.');
 
   const form = document.createElement('form');
@@ -24,4 +24,8 @@ export function signInWithGoogle(): Promise<void> {
 
 export function signOut(): Promise<void> {
   return submitAuthAction('/api/auth/signout');
+}
+
+export function resetSession(): void {
+  window.location.assign('/api/auth/guest/reset');
 }

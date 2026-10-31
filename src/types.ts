@@ -78,6 +78,7 @@ export interface LocalUpload {
 
 export interface AppSession {
   user: {
+    id?: string;
     email: string;
     name: string | null;
     image: string | null;

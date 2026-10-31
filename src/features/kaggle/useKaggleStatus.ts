@@ -15,9 +15,15 @@ export function useKaggleStatus(enabled: boolean) {
     setLoading(true);
     try {
       const response = await fetch('/api/kaggle/status', { credentials: 'same-origin', signal });
-      if (!response.ok) throw new Error('Could not check online GPU availability. Please try again.');
+      if (!response.ok) throw new Error('Could not check online GPU availability.');
       const payload = await response.json() as KaggleAvailability;
-      if (!signal?.aborted) { setStatus(payload); setError(null); }
+      if (typeof payload.available !== 'boolean' || typeof payload.message !== 'string') {
+        throw new Error('Invalid GPU status response.');
+      }
+      if (!signal?.aborted) {
+        setStatus(payload);
+        setError(null);
+      }
     } catch (cause) {
       if (!signal?.aborted) {
         setStatus(null);
@@ -29,7 +35,7 @@ export function useKaggleStatus(enabled: boolean) {
   }, [enabled]);
 
   useEffect(() => {
-    if (!enabled) { setStatus(null); setError(null); setLoading(false); return; }
+    if (!enabled) return;
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();

@@ -13,9 +13,14 @@ export function MultiFileUploadPanel({ onFiles }: { onFiles: (files: File[]) => 
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
-        <Files className="h-5 w-5 text-emerald-700" />
-        <h2 className="font-bold text-slate-900">Add your recordings</h2>
+      <div className="mb-4">
+        <div className="flex items-center gap-2">
+          <Files className="h-5 w-5 text-emerald-700" />
+          <h2 className="font-bold text-slate-900">Add your recordings</h2>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Files are stored privately in your session (up to 7 days). Uploading does not start transcription.
+        </p>
       </div>
       <div
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -28,6 +33,7 @@ export function MultiFileUploadPanel({ onFiles }: { onFiles: (files: File[]) => 
           type="file"
           multiple
           className="hidden"
+          accept="audio/*,video/*,.m4a,.mkv,.wma,.opus,.flac"
           onChange={(event) => acceptFiles(event.target.files)}
         />
         <div>
@@ -37,9 +43,6 @@ export function MultiFileUploadPanel({ onFiles }: { onFiles: (files: File[]) => 
           <button type="button" onClick={() => inputRef.current?.click()} className="mt-4 rounded-lg bg-[#294f38] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#1c3e2a]">Choose files</button>
         </div>
       </div>
-      <p className="mt-3 text-xs text-slate-400">
-        Files are stored privately in your account. Uploading does not start transcription.
-      </p>
     </section>
   );
 }
