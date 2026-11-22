@@ -105,7 +105,7 @@ export function KaggleConnection({
             {onCheckGpu && (
               <button
                 type="button"
-                onClick={() => void onCheckGpu()}
+                onClick={() => void onCheckGpu().catch(() => undefined)}
                 disabled={submitting || status?.gpuStatus === 'checking'}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#2c4439] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#385648] disabled:opacity-60"
               >
@@ -115,7 +115,7 @@ export function KaggleConnection({
             )}
             <button
               type="button"
-              onClick={() => void onDisconnect()}
+              onClick={() => void onDisconnect().catch(() => undefined)}
               disabled={submitting}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-300/30 bg-red-950/30 px-3.5 py-2 text-xs font-medium text-red-100 hover:bg-red-950/50 disabled:opacity-60"
             >

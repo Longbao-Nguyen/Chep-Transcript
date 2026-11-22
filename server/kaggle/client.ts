@@ -278,7 +278,14 @@ export async function pushKernel(
     throw new HttpError(429, 'Kaggle quota or rate limit was reached. Try again later.', 'KAGGLE_RATE_LIMITED');
   }
   if (!response.ok || (payload && typeof payload.error === 'string' && payload.error)) {
-    throw new HttpError(502, 'Kaggle could not start the transcription notebook.', 'KAGGLE_PUSH_FAILED');
+    const detail = extractSafeKaggleError(payload);
+    throw new HttpError(
+      502,
+      detail
+        ? `Kaggle could not start the notebook (HTTP ${response.status}): ${detail}`
+        : `Kaggle could not start the notebook (HTTP ${response.status}).`,
+      'KAGGLE_PUSH_FAILED',
+    );
   }
 
   return {

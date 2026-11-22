@@ -132,14 +132,23 @@ class PostgresUserRepository implements UserRepository {
   async getOrCreateAnonymousUser(id: string): Promise<User> {
     const email = `${id}@anonymous.chep.local`;
     const googleSubject = `anon:${id}`;
-    const rows = await this.sql`
+    const inserted = await this.sql`
       insert into users (id, email, google_subject, display_name, image_url)
       values (${id}, ${email}, ${googleSubject}, 'Anonymous Guest', null)
-      on conflict (id) do update set
-        updated_at = now()
+      on conflict do nothing
       returning *
     `;
-    return mapUser(rows[0] as Row);
+    if (inserted[0]) {
+      return mapUser(inserted[0] as Row);
+    }
+
+    const existing = await this.sql`
+      select * from users where id = ${id} or email = ${email} limit 1
+    `;
+    if (!existing[0]) {
+      throw new Error('Could not resolve anonymous user record.');
+    }
+    return mapUser(existing[0] as Row);
   }
 }
 

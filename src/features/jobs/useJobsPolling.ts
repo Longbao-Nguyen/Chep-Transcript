@@ -31,7 +31,20 @@ export function useJobsPolling(enabled: boolean) {
       const response = await fetch('/api/jobs', { credentials: 'same-origin' });
       const contentType = response.headers.get('content-type') || '';
       if (!response.ok || !contentType.includes('application/json')) {
-        throw new Error(response.status === 401 ? 'Your session has expired.' : 'Could not load jobs.');
+        let serverMessage: string | undefined;
+        if (contentType.includes('application/json')) {
+          try {
+            const payload = (await response.json()) as { error?: { message?: string } };
+            serverMessage = payload.error?.message;
+          } catch {
+            // Fall back to default message below when JSON error body cannot be parsed.
+          }
+        }
+        throw new Error(
+          response.status === 401
+            ? 'Your session has expired.'
+            : serverMessage || 'Could not load jobs.',
+        );
       }
       const payload = (await response.json()) as {
         jobs: ClientJob[];
