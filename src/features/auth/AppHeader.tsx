@@ -5,6 +5,8 @@ import type { TranscriptionModelSummary } from '../../../shared/models';
 import type { AppSession } from '../../types';
 import { resetSession, signInWithGoogle, signOut } from './authActions';
 
+export type ComputeBackend = 'kaggle' | 'colab';
+
 export function AppHeader({
   user,
   page,
@@ -12,6 +14,8 @@ export function AppHeader({
   models,
   selectedLanguage = 'fr',
   onSelectLanguage,
+  computeBackend = 'kaggle',
+  onSelectBackend,
 }: {
   user: AppSession['user'];
   page: string;
@@ -19,6 +23,8 @@ export function AppHeader({
   models: TranscriptionModelSummary[];
   selectedLanguage?: string;
   onSelectLanguage?: (language: string) => void;
+  computeBackend?: ComputeBackend;
+  onSelectBackend?: (backend: ComputeBackend) => void;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(
     () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('model_open') === '1',
@@ -43,7 +49,7 @@ export function AppHeader({
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-md sm:px-6">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2.5 sm:gap-4">
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <span className="font-normal text-slate-500">Workspace</span>
           {user.name && user.name !== 'Guest' && user.name !== 'Anonymous Guest' ? (
@@ -59,7 +65,7 @@ export function AppHeader({
           <strong className="font-semibold text-slate-900">{page}</strong>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <div className="relative" ref={dropdownRef}>
             <button
               type="button"
@@ -118,6 +124,37 @@ export function AppHeader({
                 </div>
               </div>
             )}
+          </div>
+
+          <div
+            role="group"
+            aria-label="Compute backend"
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 shadow-sm"
+          >
+            <button
+              type="button"
+              aria-pressed={computeBackend === 'kaggle'}
+              onClick={() => onSelectBackend?.('kaggle')}
+              className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                computeBackend === 'kaggle'
+                  ? 'bg-white font-semibold text-emerald-900 shadow-sm'
+                  : 'font-medium text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Kaggle
+            </button>
+            <button
+              type="button"
+              aria-pressed={computeBackend === 'colab'}
+              onClick={() => onSelectBackend?.('colab')}
+              className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                computeBackend === 'colab'
+                  ? 'bg-white font-semibold text-emerald-900 shadow-sm'
+                  : 'font-medium text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Colab
+            </button>
           </div>
 
           <button

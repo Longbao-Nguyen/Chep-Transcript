@@ -42,7 +42,7 @@ export async function dispatchClaimedJob(input: DispatchClaimedJobInput): Promis
   if (!auth.username) {
     throw new HttpError(
       400,
-      'Enter your Kaggle username in the Kaggle connection panel and reconnect before starting transcription.',
+      'Could not resolve your Kaggle username from this API token. Reconnect your Kaggle API token and try again.',
       'KAGGLE_USERNAME_REQUIRED',
     );
   }
@@ -131,7 +131,7 @@ export async function dispatchNextQueuedJob(input: DispatchNextQueuedJobInput): 
     }
     throw new HttpError(
       400,
-      'Enter your Kaggle username in the Kaggle connection panel and reconnect before starting transcription.',
+      'Could not resolve your Kaggle username from this API token. Reconnect your Kaggle API token and try again.',
       'KAGGLE_USERNAME_REQUIRED',
     );
   }

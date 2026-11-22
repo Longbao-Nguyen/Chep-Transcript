@@ -22,50 +22,42 @@ export function KaggleConnection({
   onDisconnect: () => Promise<unknown>;
 }) {
   const headingId = useId();
-  const usernameId = useId();
-  const usernameHintId = useId();
   const tokenId = useId();
   const tokenHintId = useId();
   const formErrorId = useId();
 
-  const [username, setUsername] = useState('');
   const [apiToken, setApiToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [invalidField, setInvalidField] = useState<'username' | 'apiToken' | null>(null);
+  const [invalidToken, setInvalidToken] = useState(false);
 
-  const usernameRef = useRef<HTMLInputElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedToken = apiToken.trim();
-    const trimmedUser = username.trim();
 
     if (!trimmedToken) {
-      setInvalidField('apiToken');
-      setFormError('Enter your Kaggle API token (KGAT_...) or kaggle.json contents.');
+      setInvalidToken(true);
+      setFormError('Enter your Kaggle API token (KGAT_...).');
       tokenRef.current?.focus();
       return;
     }
 
-    if (!trimmedToken.startsWith('KGAT_') && !trimmedToken.startsWith('{') && !trimmedUser) {
-      setInvalidField('username');
-      setFormError('Enter your Kaggle username when using a legacy API key.');
-      usernameRef.current?.focus();
+    if (!trimmedToken.startsWith('KGAT_') && !trimmedToken.startsWith('{')) {
+      setInvalidToken(true);
+      setFormError('Enter your Kaggle API token starting with KGAT_.');
+      tokenRef.current?.focus();
       return;
     }
 
     setFormError(null);
-    setInvalidField(null);
+    setInvalidToken(false);
     try {
-      await onConnect({
-        apiToken: trimmedToken,
-        username: trimmedUser || undefined,
-      });
+      await onConnect({ apiToken: trimmedToken });
       setApiToken('');
     } catch (cause) {
-      setInvalidField('apiToken');
+      setInvalidToken(true);
       setFormError(cause instanceof Error ? cause.message : 'Could not verify Kaggle credentials.');
       tokenRef.current?.focus();
     }
@@ -148,43 +140,11 @@ export function KaggleConnection({
 
           <form method="POST" onSubmit={(event) => void handleSubmit(event)} aria-labelledby={headingId} className="mt-4 space-y-3" noValidate>
             <div>
-              <label htmlFor={usernameId} className="block text-xs font-medium text-emerald-100">
-                Kaggle username (optional for KGAT_)
-              </label>
-              <p id={usernameHintId} className="mt-0.5 text-[11px] leading-4 text-emerald-100/60">
-                Required only for legacy keys; used to scope created notebooks.
-              </p>
-              <input
-                ref={usernameRef}
-                id={usernameId}
-                name="kaggleUsername"
-                type="text"
-                value={username}
-                onChange={(event) => {
-                  setUsername(event.target.value);
-                  if (invalidField === 'username') {
-                    setInvalidField(null);
-                    setFormError(null);
-                  }
-                }}
-                autoComplete="username"
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                enterKeyHint="next"
-                aria-describedby={usernameHintId}
-                aria-invalid={invalidField === 'username' ? 'true' : undefined}
-                placeholder="your-kaggle-username"
-                className="mt-1.5 w-full rounded-lg border border-white/20 bg-[#10221d] px-3 py-2 text-base sm:text-xs text-white placeholder:text-emerald-100/35"
-              />
-            </div>
-
-            <div>
               <label htmlFor={tokenId} className="block text-xs font-medium text-emerald-100">
                 Kaggle API Token <span aria-hidden="true">*</span>
               </label>
               <p id={tokenHintId} className="mt-0.5 text-[11px] leading-4 text-emerald-100/60">
-                Paste your <code className="text-emerald-200">KGAT_...</code> token or <code className="text-emerald-200">kaggle.json</code>. Stored encrypted with AES-256-GCM.
+                Paste your <code className="text-emerald-200">KGAT_...</code> token from Kaggle Settings. Stored encrypted with AES-256-GCM.
               </p>
               <div className="relative mt-1.5">
                 <input
@@ -195,8 +155,8 @@ export function KaggleConnection({
                   value={apiToken}
                   onChange={(event) => {
                     setApiToken(event.target.value);
-                    if (invalidField === 'apiToken') {
-                      setInvalidField(null);
+                    if (invalidToken) {
+                      setInvalidToken(false);
                       setFormError(null);
                     }
                   }}
@@ -207,7 +167,7 @@ export function KaggleConnection({
                   spellCheck={false}
                   enterKeyHint="done"
                   aria-describedby={activeError ? `${tokenHintId} ${formErrorId}` : tokenHintId}
-                  aria-invalid={invalidField === 'apiToken' ? 'true' : undefined}
+                  aria-invalid={invalidToken ? 'true' : undefined}
                   placeholder="KGAT_..."
                   className="w-full rounded-lg border border-white/20 bg-[#10221d] py-2 pl-3 pr-10 text-base sm:text-xs text-white placeholder:text-emerald-100/35"
                 />

@@ -183,14 +183,25 @@ try {
   });
 
   await page.goto(origin);
-  await page.getByRole('heading', { name: 'Your recordings, ready to transcribe.' }).waitFor();
+  await page.getByText('Drop audio or video files here', { exact: true }).waitFor();
   await page.getByText('Connect with Kaggle API Token').waitFor();
+  assert.equal(await page.getByPlaceholder('your-kaggle-username').count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Start', exact: true }).isDisabled(), true);
 
-  // Verify model selector allows choosing another language
-  await page.getByLabel('Language & model').selectOption('vi');
-  assert.equal(await page.getByLabel('Language & model').inputValue(), 'vi');
-  await page.getByLabel('Language & model').selectOption('fr');
+  // Verify Model selector in top header allows choosing another language
+  await page.getByRole('button', { name: /Model:/ }).click();
+  await page.getByRole('option', { name: /Vietnamese/ }).click();
+  await page.getByRole('button', { name: /Model:\s*Vietnamese/ }).waitFor();
+  await page.getByRole('button', { name: /Model:/ }).click();
+  await page.getByRole('option', { name: /French/ }).click();
+  await page.getByRole('button', { name: /Model:\s*French/ }).waitFor();
+
+  // Verify Kaggle / Colab toggle in top header switches left connection panel
+  const backendGroup = page.getByRole('group', { name: 'Compute backend' });
+  await backendGroup.getByRole('button', { name: 'Colab', exact: true }).click();
+  await page.getByRole('heading', { name: 'Colab connection' }).waitFor();
+  await backendGroup.getByRole('button', { name: 'Kaggle', exact: true }).click();
+  await page.getByText('Connect with Kaggle API Token').waitFor();
 
   // Verify Kaggle token connect & disconnect fixture flow
   await page.getByLabel('Kaggle API Token *').fill('KGAT_fixture_token_123456');

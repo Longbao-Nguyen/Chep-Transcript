@@ -138,7 +138,7 @@ export const POST = route(async (request) => {
     if (!auth.username) {
       throw new HttpError(
         400,
-        'Enter your Kaggle username and reconnect before checking GPU access.',
+        'Could not resolve your Kaggle username from this API token. Reconnect your Kaggle API token and try again.',
         'KAGGLE_USERNAME_REQUIRED',
       );
     }

@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from 'react';
 import { AudioLines, History, ShieldCheck } from 'lucide-react';
 
-import { AppHeader } from './features/auth/AppHeader';
+import { AppHeader, type ComputeBackend } from './features/auth/AppHeader';
 import { SignInCard } from './features/auth/SignInCard';
 import { useSession } from './features/auth/useSession';
+import { ColabConnection } from './features/colab/ColabConnection';
 import { CompletedJobs } from './features/jobs/CompletedJobs';
 import { CurrentJobs } from './features/jobs/CurrentJobs';
 import { isActiveJob, useJobsPolling } from './features/jobs/useJobsPolling';
@@ -28,6 +29,16 @@ function createLocalUpload(file: File): LocalUpload {
   };
 }
 
+const COMPUTE_BACKEND_KEY = 'chep_compute_backend';
+
+function readStoredComputeBackend(): ComputeBackend {
+  try {
+    return window.localStorage.getItem(COMPUTE_BACKEND_KEY) === 'colab' ? 'colab' : 'kaggle';
+  } catch {
+    return 'kaggle';
+  }
+}
+
 export default function App() {
   const { session, loading: sessionLoading, error: sessionError } = useSession();
   const { jobs, queueState, queuedCount, pauseAfterCurrent, loading: jobsLoading, error: jobsError, refresh } = useJobsPolling(Boolean(session));
@@ -40,12 +51,22 @@ export default function App() {
   const [tab, setTab] = useState<'transcribe' | 'history'>('transcribe');
   const { models, defaultLanguage } = useModels();
   const [selectedLanguage, setSelectedLanguage] = useState<string>(defaultLanguage);
+  const [computeBackend, setComputeBackend] = useState<ComputeBackend>(readStoredComputeBackend);
   const [guideOpen, setGuideOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const startLock = useRef(false);
   const kaggle = useKaggleStatus(Boolean(session));
   const selectedModel = models.find((item) => item.language === selectedLanguage) ?? models[0];
+
+  const handleSelectBackend = useCallback((next: ComputeBackend) => {
+    setComputeBackend(next);
+    try {
+      window.localStorage.setItem(COMPUTE_BACKEND_KEY, next);
+    } catch {
+      // Ignore storage access errors in restricted browsing contexts.
+    }
+  }, []);
 
   const cancelJob = useCallback(async (job: ClientJob) => {
     setConfirmJob(null);
@@ -248,30 +269,37 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Mobile toggle for Kaggle connection */}
+        {/* Mobile toggle for compute backend connection */}
         <button
           type="button"
           aria-expanded={connectionOpen}
-          aria-controls="kaggle-panel"
+          aria-controls={computeBackend === 'kaggle' ? 'kaggle-panel' : 'colab-panel'}
           onClick={() => setConnectionOpen((open) => !open)}
           className="mt-4 flex w-full items-center justify-between rounded-lg border border-white/15 px-3 py-2 text-xs text-emerald-100 lg:hidden"
         >
-          <span>Kaggle connection</span>
+          <span>{computeBackend === 'kaggle' ? 'Kaggle connection' : 'Colab connection'}</span>
           <span>{connectionOpen ? 'Hide details' : 'Show setup'}</span>
         </button>
 
-        {/* Kaggle Connection Panel */}
-        <div id="kaggle-panel" className={`${connectionOpen ? 'block' : 'hidden'} lg:block`}>
-          <KaggleConnection
-            status={kaggle.status}
-            loading={kaggle.loading}
-            submitting={kaggle.submitting}
-            error={kaggle.error}
-            onRefresh={() => void kaggle.refresh()}
-            onConnect={kaggle.connect}
-            onCheckGpu={kaggle.checkGpu}
-            onDisconnect={kaggle.disconnect}
-          />
+        {/* Compute Backend Connection Panel */}
+        <div id={computeBackend === 'kaggle' ? 'kaggle-panel' : 'colab-panel'} className={`${connectionOpen ? 'block' : 'hidden'} lg:block`}>
+          {computeBackend === 'kaggle' ? (
+            <KaggleConnection
+              status={kaggle.status}
+              loading={kaggle.loading}
+              submitting={kaggle.submitting}
+              error={kaggle.error}
+              onRefresh={() => void kaggle.refresh()}
+              onConnect={kaggle.connect}
+              onCheckGpu={kaggle.checkGpu}
+              onDisconnect={kaggle.disconnect}
+            />
+          ) : (
+            <ColabConnection
+              user={session.user}
+              onSwitchToKaggle={() => handleSelectBackend('kaggle')}
+            />
+          )}
         </div>
 
         <p className="mt-8 hidden items-center gap-2 border-t border-white/15 pt-5 text-xs text-emerald-100/70 lg:flex">
@@ -287,6 +315,8 @@ export default function App() {
           models={models}
           selectedLanguage={selectedLanguage}
           onSelectLanguage={setSelectedLanguage}
+          computeBackend={computeBackend}
+          onSelectBackend={handleSelectBackend}
         />
 
         <main className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-8">
@@ -298,12 +328,7 @@ export default function App() {
 
           {tab === 'transcribe' ? (
             <div className="space-y-6">
-              <MultiFileUploadPanel
-                onFiles={handleFiles}
-                models={models}
-                selectedLanguage={selectedLanguage}
-                onSelectLanguage={setSelectedLanguage}
-              />
+              <MultiFileUploadPanel onFiles={handleFiles} />
               <CurrentJobs
                 jobs={jobs}
                 uploads={uploads}

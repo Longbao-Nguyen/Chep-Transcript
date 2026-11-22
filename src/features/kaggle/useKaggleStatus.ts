@@ -15,7 +15,6 @@ export interface KaggleStatus {
 
 export interface ConnectKaggleInput {
   apiToken: string;
-  username?: string;
 }
 
 async function readApiError(response: Response, fallback: string): Promise<string> {

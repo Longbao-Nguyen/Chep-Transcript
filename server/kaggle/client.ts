@@ -72,6 +72,43 @@ async function readJsonSafe(response: Response): Promise<unknown> {
   }
 }
 
+function extractSafeKaggleError(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const candidate = payload as { message?: unknown; error?: unknown };
+  const raw = typeof candidate.message === 'string'
+    ? candidate.message
+    : typeof candidate.error === 'string'
+      ? candidate.error
+      : '';
+  const cleaned = raw.replace(/[\r\n\t]+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, 200) : null;
+}
+
+function extractUsernameFromPayload(payload: unknown): string | null {
+  if (!payload) return null;
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return null;
+    const first = payload[0] as { ref?: unknown; author?: unknown };
+    if (typeof first.ref === 'string' && first.ref.includes('/')) {
+      const owner = first.ref.split('/')[0]?.trim();
+      if (owner) return owner;
+    }
+    if (typeof first.author === 'string' && first.author.trim()) {
+      return first.author.trim();
+    }
+    return null;
+  }
+  if (typeof payload === 'object') {
+    const obj = payload as { userName?: unknown; username?: unknown; user_name?: unknown };
+    for (const candidate of [obj.userName, obj.username, obj.user_name]) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  }
+  return null;
+}
+
 export function normalizeKaggleKernelStatus(raw: unknown): NormalizedKernelStatus {
   if (typeof raw !== 'string' || !raw.trim()) return 'unknown';
   const cleaned = raw.trim().replace(/^KernelWorkerStatus\./i, '').toLowerCase();
@@ -91,11 +128,12 @@ export async function verifyCredentials(
   options: KaggleClientOptions = {},
 ): Promise<VerifyCredentialsResult> {
   const fetchFn = getFetch(options);
-  const url = `${getBaseUrl(options)}/kernels/list?mine=true&pageSize=1`;
+  const baseUrl = getBaseUrl(options);
+  const helloUrl = `${baseUrl}/hello`;
 
-  let response: Response;
+  let helloResponse: Response;
   try {
-    response = await fetchFn(url, {
+    helloResponse = await fetchFn(helloUrl, {
       method: 'GET',
       headers: { ...headers, Accept: 'application/json' },
     });
@@ -103,7 +141,7 @@ export async function verifyCredentials(
     throw new HttpError(502, 'Could not reach Kaggle API to verify credentials.', 'KAGGLE_API_UNAVAILABLE');
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (helloResponse.status === 401 || helloResponse.status === 403) {
     return {
       valid: false,
       username: null,
@@ -111,24 +149,74 @@ export async function verifyCredentials(
     };
   }
 
-  if (!response.ok) {
-    throw new HttpError(502, `Kaggle API returned status ${response.status}.`, 'KAGGLE_API_UNAVAILABLE');
-  }
+  if (helloResponse.ok) {
+    const payload = await readJsonSafe(helloResponse);
+    let inferredUsername: string | null = expectedUsername ?? extractUsernameFromPayload(payload);
 
-  const payload = await readJsonSafe(response);
-  let inferredUsername: string | null = expectedUsername ?? null;
-  if (!inferredUsername && Array.isArray(payload) && payload.length > 0) {
-    const first = payload[0] as { ref?: unknown; author?: unknown };
-    if (typeof first.ref === 'string' && first.ref.includes('/')) {
-      inferredUsername = first.ref.split('/')[0] || null;
-    } else if (typeof first.author === 'string' && first.author.trim()) {
-      inferredUsername = first.author.trim();
+    if (!inferredUsername) {
+      try {
+        const listResponse = await fetchFn(`${baseUrl}/kernels/list?group=profile&pageSize=1`, {
+          method: 'GET',
+          headers: { ...headers, Accept: 'application/json' },
+        });
+        if (listResponse.ok) {
+          inferredUsername = extractUsernameFromPayload(await readJsonSafe(listResponse));
+        }
+      } catch {
+        // Best-effort secondary username lookup; /hello already authenticated the token.
+      }
     }
+
+    return {
+      valid: true,
+      username: inferredUsername,
+    };
   }
 
+  if (helloResponse.status !== 404 && helloResponse.status !== 405) {
+    const detail = extractSafeKaggleError(await readJsonSafe(helloResponse));
+    throw new HttpError(
+      502,
+      detail
+        ? `Kaggle API returned status ${helloResponse.status}: ${detail}`
+        : `Kaggle API returned status ${helloResponse.status}.`,
+      'KAGGLE_API_UNAVAILABLE',
+    );
+  }
+
+  let listResponse: Response;
+  try {
+    listResponse = await fetchFn(`${baseUrl}/kernels/list?group=profile&pageSize=1`, {
+      method: 'GET',
+      headers: { ...headers, Accept: 'application/json' },
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API to verify credentials.', 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (listResponse.status === 401 || listResponse.status === 403) {
+    return {
+      valid: false,
+      username: null,
+      error: 'Kaggle rejected these API credentials. Check your token and try again.',
+    };
+  }
+
+  if (!listResponse.ok) {
+    const detail = extractSafeKaggleError(await readJsonSafe(listResponse));
+    throw new HttpError(
+      502,
+      detail
+        ? `Kaggle API returned status ${listResponse.status}: ${detail}`
+        : `Kaggle API returned status ${listResponse.status}.`,
+      'KAGGLE_API_UNAVAILABLE',
+    );
+  }
+
+  const listPayload = await readJsonSafe(listResponse);
   return {
     valid: true,
-    username: inferredUsername,
+    username: expectedUsername ?? extractUsernameFromPayload(listPayload),
   };
 }
 

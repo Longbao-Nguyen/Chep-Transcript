@@ -4,17 +4,55 @@ import test from 'node:test';
 import { HttpError } from '../../server/http/responses';
 import { cancelKernel, getKernelStatus, pushKernel, verifyCredentials } from '../../server/kaggle/client';
 
-test('verifyCredentials handles valid, invalid, and unavailable responses without leaking headers', async () => {
-  const valid = await verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
-    fetchFn: async () => Response.json([{ ref: 'alice/demo-kernel' }]),
+test('verifyCredentials verifies via /hello, resolves username via group=profile when needed, and never leaks tokens', async () => {
+  const seenUrls: string[] = [];
+  const validDirect = await verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
+    fetchFn: async (url) => {
+      seenUrls.push(String(url));
+      return Response.json({ userName: 'alice' });
+    },
   });
-  assert.deepEqual(valid, { valid: true, username: 'alice' });
+  assert.deepEqual(validDirect, { valid: true, username: 'alice' });
+  assert.equal(seenUrls[0], 'https://www.kaggle.com/api/v1/hello');
+
+  const fallbackUrls: string[] = [];
+  const validWithLookup = await verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
+    fetchFn: async (url) => {
+      const target = String(url);
+      fallbackUrls.push(target);
+      assert.equal(target.includes('mine='), false);
+      if (target.endsWith('/hello')) return Response.json({ ok: true });
+      return Response.json([{ ref: 'alice/demo-kernel' }]);
+    },
+  });
+  assert.deepEqual(validWithLookup, { valid: true, username: 'alice' });
+  assert.deepEqual(fallbackUrls, [
+    'https://www.kaggle.com/api/v1/hello',
+    'https://www.kaggle.com/api/v1/kernels/list?group=profile&pageSize=1',
+  ]);
+
+  const validFrom404 = await verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
+    fetchFn: async (url) => {
+      const target = String(url);
+      assert.equal(target.includes('mine='), false);
+      if (target.endsWith('/hello')) return new Response('not found', { status: 404 });
+      return Response.json([{ author: 'alice' }]);
+    },
+  });
+  assert.deepEqual(validFrom404, { valid: true, username: 'alice' });
 
   const rejected = await verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
     fetchFn: async () => new Response('unauthorized', { status: 401 }),
   });
   assert.equal(rejected.valid, false);
   assert.equal(rejected.username, null);
+
+  await assert.rejects(
+    () => verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
+      fetchFn: async () => new Response(JSON.stringify({ message: 'Upstream failure' }), { status: 500 }),
+    }),
+    (error: unknown) => error instanceof HttpError && error.status === 502 && error.message.includes('500') && error.message.includes('Upstream failure'),
+  );
 
   await assert.rejects(
     () => verifyCredentials({ Authorization: 'Bearer KGAT_secret_123456' }, null, {
