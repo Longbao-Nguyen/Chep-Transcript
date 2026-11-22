@@ -20,6 +20,10 @@ async function createRepositories(): Promise<Repositories> {
   throw new Error(`Unsupported DB_PROVIDER: ${provider}`);
 }
 
+export function setRepositoriesForTests(repositories: Repositories | undefined): void {
+  repositoriesPromise = repositories ? Promise.resolve(repositories) : undefined;
+}
+
 export function resetRepositoriesForTests(): void {
   repositoriesPromise = undefined;
 }

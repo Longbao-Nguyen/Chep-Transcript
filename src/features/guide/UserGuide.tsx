@@ -16,8 +16,8 @@ export function UserGuide({ onClose }: { onClose: () => void }) {
       </div>
       <div className="space-y-7 p-6 text-sm leading-7">
         <section><h3 className="font-semibold">1. Add your recordings</h3><p>Choose audio or video files, or drop them into Transcribe. Uploads are saved privately to your 7-day session. You can return to your queue and history after refreshing the page.</p></section>
-        <section><h3 className="font-semibold">2. Online GPU status</h3><p>The Kaggle panel reports availability from this app's server. Account linking and GPU processing are still in development. Opening Kaggle settings does not connect your account to this app.</p></section>
-        <section><h3 className="font-semibold">3. Manage your queue</h3><p>Remove a waiting file to cancel its job and release stored media. Start and Resume remain unavailable until the GPU worker is implemented.</p></section>
+        <section><h3 className="font-semibold">2. Connect Kaggle</h3><p>Generate a personal API token (<code>KGAT_...</code>) under Account settings on <code>kaggle.com/settings</code> and paste it in the Kaggle panel. Your token is encrypted with AES-256-GCM before storage.</p></section>
+        <section><h3 className="font-semibold">3. Manage your queue</h3><p>Once Kaggle is connected, click Start to process queued files sequentially on Kaggle T4 GPUs. Remove waiting files or cancel active jobs at any time.</p></section>
         <section><h3 className="font-semibold">4. Find your transcripts</h3><p>History shows completed, cancelled, and failed jobs. Download TXT is available for completed transcripts while the server retains them.</p></section>
         <section><h3 className="font-semibold">Planned online processing</h3><p>Files are processed sequentially using Whisper models on Kaggle. Recordings of at least 21 minutes will split across two parallel notebooks when capacity allows, combining outputs into a single transcript.</p></section>
       </div>

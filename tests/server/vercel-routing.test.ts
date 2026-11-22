@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 interface VercelConfig {
+  crons?: Array<{ path: string; schedule: string }>;
   rewrites?: Array<{ source: string; destination: string }>;
 }
 
@@ -45,10 +46,29 @@ test('Vercel backend uses Node ESM-resolvable relative import specifiers', () =>
   }
 });
 
-test('Kaggle status reuses the jobs function and the deployment stays within twelve functions', () => {
+test('Kaggle routes use api/kaggle/[action], cleanup cron is configured, and deployment stays within twelve functions', () => {
   const config = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8')) as VercelConfig;
-  assert.deepEqual(config.rewrites?.find(({ source }) => source === '/api/kaggle/status'), {
-    source: '/api/kaggle/status', destination: '/api/jobs?view=kaggle-status',
-  });
-  assert.ok(findTypeScriptFiles(fileURLToPath(new URL('../../api', import.meta.url))).length <= 12);
+  const apiFiles = findTypeScriptFiles(fileURLToPath(new URL('../../api', import.meta.url)));
+  assert.ok(apiFiles.some((pathname) => pathname.endsWith(join('kaggle', '[action].ts'))));
+  assert.ok(apiFiles.some((pathname) => pathname.endsWith(join('cron', 'cleanup.ts'))));
+  assert.ok(config.crons?.some((cron) => cron.path === '/api/cron/cleanup'));
+  assert.ok(apiFiles.length <= 12);
+});
+
+test('storage provider implementation is only imported through server/storage/index.ts', () => {
+  const backendFiles = [
+    ...findTypeScriptFiles(fileURLToPath(new URL('../../api', import.meta.url))),
+    ...findTypeScriptFiles(fileURLToPath(new URL('../../server', import.meta.url))),
+  ];
+  const storageIndex = fileURLToPath(new URL('../../server/storage/index.ts', import.meta.url));
+  const vercelBlobProvider = fileURLToPath(new URL('../../server/storage/providers/vercel-blob.ts', import.meta.url));
+  for (const pathname of backendFiles) {
+    if (pathname === storageIndex || pathname === vercelBlobProvider) continue;
+    const source = readFileSync(pathname, 'utf8');
+    assert.equal(
+      source.includes('providers/vercel-blob'),
+      false,
+      `${pathname} should use server/storage/index.ts instead of importing vercel-blob directly`,
+    );
+  }
 });

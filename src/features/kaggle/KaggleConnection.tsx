@@ -1,34 +1,275 @@
-import { ExternalLink, RefreshCw, ShieldCheck } from 'lucide-react';
-import type { KaggleAvailability } from './useKaggleStatus';
+import { useId, useRef, useState, type FormEvent } from 'react';
+import { CheckCircle2, Cpu, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
+import type { ConnectKaggleInput, KaggleStatus } from './useKaggleStatus';
 
-export function KaggleConnection({ status, loading, error, onRefresh }: {
-  status: KaggleAvailability | null;
+export function KaggleConnection({
+  status,
+  loading,
+  submitting,
+  error,
+  onRefresh,
+  onConnect,
+  onCheckGpu,
+  onDisconnect,
+}: {
+  status: KaggleStatus | null;
   loading: boolean;
+  submitting: boolean;
   error: string | null;
   onRefresh: () => void;
+  onConnect: (input: ConnectKaggleInput) => Promise<unknown>;
+  onCheckGpu?: () => Promise<unknown>;
+  onDisconnect: () => Promise<unknown>;
 }) {
+  const headingId = useId();
+  const usernameId = useId();
+  const usernameHintId = useId();
+  const tokenId = useId();
+  const tokenHintId = useId();
+  const formErrorId = useId();
+
+  const [username, setUsername] = useState('');
+  const [apiToken, setApiToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<'username' | 'apiToken' | null>(null);
+
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const tokenRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedToken = apiToken.trim();
+    const trimmedUser = username.trim();
+
+    if (!trimmedToken) {
+      setInvalidField('apiToken');
+      setFormError('Enter your Kaggle API token (KGAT_...) or kaggle.json contents.');
+      tokenRef.current?.focus();
+      return;
+    }
+
+    if (!trimmedToken.startsWith('KGAT_') && !trimmedToken.startsWith('{') && !trimmedUser) {
+      setInvalidField('username');
+      setFormError('Enter your Kaggle username when using a legacy API key.');
+      usernameRef.current?.focus();
+      return;
+    }
+
+    setFormError(null);
+    setInvalidField(null);
+    try {
+      await onConnect({
+        apiToken: trimmedToken,
+        username: trimmedUser || undefined,
+      });
+      setApiToken('');
+    } catch (cause) {
+      setInvalidField('apiToken');
+      setFormError(cause instanceof Error ? cause.message : 'Could not verify Kaggle credentials.');
+      tokenRef.current?.focus();
+    }
+  };
+
+  const activeError = formError || error;
+  const isConnected = Boolean(status?.connected);
+
   return (
-    <section className="mt-8 border-t border-white/15 pt-6" aria-labelledby="kaggle-heading">
-      <h2 id="kaggle-heading" className="flex items-center gap-2 text-xs font-semibold tracking-widest text-emerald-100/70 uppercase">
+    <section className="mt-8 border-t border-white/15 pt-6" aria-labelledby={headingId}>
+      <h2 id={headingId} className="flex items-center gap-2 text-xs font-semibold tracking-widest text-emerald-100/70 uppercase">
         <ShieldCheck size={16} className="text-emerald-300" /> Kaggle connection
       </h2>
-      <p className="mt-3 text-base font-semibold text-white">
-        {status?.available ? 'Online GPU available' : 'Online GPU unavailable'}
-      </p>
-      <p className="mt-1 text-xs leading-5 text-emerald-100/70">
-        {error || status?.message || (loading ? 'Checking server status…' : 'Kaggle connection has not been configured.')}
-      </p>
-      <div className="mt-4 space-y-2">
-        <a href="https://www.kaggle.com/settings" target="_blank" rel="noreferrer" className="flex w-full items-center justify-between rounded-lg bg-[#2c4439] px-3.5 py-2.5 text-xs font-medium text-white hover:bg-[#385648]">
-          <span>Open Kaggle settings</span><ExternalLink size={13} className="text-emerald-300" />
-        </a>
-        <button type="button" onClick={onRefresh} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100 hover:bg-white/10 disabled:opacity-60">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh status
-        </button>
-      </div>
-      <p className="mt-4 text-[11px] leading-5 text-emerald-50/50">
-        Signing in on Kaggle does not connect this app to your Kaggle account. Account linking and GPU processing are still in development.
-      </p>
+
+      {isConnected ? (
+        <div className="mt-3 space-y-3">
+          <div className="rounded-xl border border-emerald-400/25 bg-[#233d33] p-3">
+            <p className="flex items-center gap-2 text-sm font-semibold text-white">
+              <CheckCircle2 size={16} className="shrink-0 text-emerald-300" />
+              <span>{status?.username ? `Connected as ${status.username}` : 'Kaggle connected'}</span>
+            </p>
+            <p className="mt-1 text-xs leading-5 text-emerald-100/75">
+              Auth mode: {status?.authMode === 'oauth2' ? 'OAuth 2.0' : 'Personal API Token'}
+            </p>
+            {status?.gpuStatus && status.gpuStatus !== 'unchecked' && (
+              <p className={`mt-2 rounded-lg px-2.5 py-1.5 text-[11px] leading-4 ${
+                status.gpuStatus === 'ready'
+                  ? 'bg-emerald-950/60 text-emerald-200'
+                  : status.gpuStatus === 'error'
+                    ? 'bg-red-950/60 text-red-100'
+                    : 'bg-amber-950/50 text-amber-100'
+              }`}>
+                {status.gpuMessage || (status.gpuStatus === 'ready' ? 'Kaggle T4 GPU confirmed.' : 'Checking GPU…')}
+              </p>
+            )}
+          </div>
+
+          {activeError && (
+            <p role="alert" className="rounded-lg border border-red-400/40 bg-red-950/50 px-3 py-2 text-xs text-red-100">
+              {activeError}
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {onCheckGpu && (
+              <button
+                type="button"
+                onClick={() => void onCheckGpu()}
+                disabled={submitting || status?.gpuStatus === 'checking'}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#2c4439] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#385648] disabled:opacity-60"
+              >
+                <Cpu size={13} className={status?.gpuStatus === 'checking' ? 'animate-pulse' : ''} />
+                {status?.gpuStatus === 'checking' ? 'Checking GPU…' : 'Check GPU condition'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void onDisconnect()}
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-300/30 bg-red-950/30 px-3.5 py-2 text-xs font-medium text-red-100 hover:bg-red-950/50 disabled:opacity-60"
+            >
+              <Unplug size={13} /> {submitting ? 'Disconnecting…' : 'Disconnect Kaggle'}
+            </button>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading || submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100 hover:bg-white/10 disabled:opacity-60"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh status
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <p className="text-sm font-semibold text-white">Connect with Kaggle API Token</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-100/70">
+            {status?.message || (loading ? 'Checking connection…' : 'Create a personal API token (KGAT_...) in Kaggle Settings to unlock T4 GPU transcription.')}
+          </p>
+
+          <form method="POST" onSubmit={(event) => void handleSubmit(event)} aria-labelledby={headingId} className="mt-4 space-y-3" noValidate>
+            <div>
+              <label htmlFor={usernameId} className="block text-xs font-medium text-emerald-100">
+                Kaggle username (optional for KGAT_)
+              </label>
+              <p id={usernameHintId} className="mt-0.5 text-[11px] leading-4 text-emerald-100/60">
+                Required only for legacy keys; used to scope created notebooks.
+              </p>
+              <input
+                ref={usernameRef}
+                id={usernameId}
+                name="kaggleUsername"
+                type="text"
+                value={username}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  if (invalidField === 'username') {
+                    setInvalidField(null);
+                    setFormError(null);
+                  }
+                }}
+                autoComplete="username"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                enterKeyHint="next"
+                aria-describedby={usernameHintId}
+                aria-invalid={invalidField === 'username' ? 'true' : undefined}
+                placeholder="your-kaggle-username"
+                className="mt-1.5 w-full rounded-lg border border-white/20 bg-[#10221d] px-3 py-2 text-base sm:text-xs text-white placeholder:text-emerald-100/35"
+              />
+            </div>
+
+            <div>
+              <label htmlFor={tokenId} className="block text-xs font-medium text-emerald-100">
+                Kaggle API Token <span aria-hidden="true">*</span>
+              </label>
+              <p id={tokenHintId} className="mt-0.5 text-[11px] leading-4 text-emerald-100/60">
+                Paste your <code className="text-emerald-200">KGAT_...</code> token or <code className="text-emerald-200">kaggle.json</code>. Stored encrypted with AES-256-GCM.
+              </p>
+              <div className="relative mt-1.5">
+                <input
+                  ref={tokenRef}
+                  id={tokenId}
+                  name="kaggleApiToken"
+                  type={showToken ? 'text' : 'password'}
+                  value={apiToken}
+                  onChange={(event) => {
+                    setApiToken(event.target.value);
+                    if (invalidField === 'apiToken') {
+                      setInvalidField(null);
+                      setFormError(null);
+                    }
+                  }}
+                  required
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  enterKeyHint="done"
+                  aria-describedby={activeError ? `${tokenHintId} ${formErrorId}` : tokenHintId}
+                  aria-invalid={invalidField === 'apiToken' ? 'true' : undefined}
+                  placeholder="KGAT_..."
+                  className="w-full rounded-lg border border-white/20 bg-[#10221d] py-2 pl-3 pr-10 text-base sm:text-xs text-white placeholder:text-emerald-100/35"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken((prev) => !prev)}
+                  aria-pressed={showToken}
+                  aria-label={showToken ? 'Hide API token' : 'Show API token'}
+                  className="absolute inset-y-0 right-1 flex items-center justify-center rounded px-2 text-emerald-100/70 hover:text-white"
+                >
+                  {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+
+            {activeError && (
+              <p id={formErrorId} role="alert" className="rounded-lg border border-red-400/40 bg-red-950/50 px-3 py-2 text-xs text-red-100">
+                {activeError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+            >
+              <KeyRound size={14} />
+              {submitting ? 'Verifying token…' : 'Connect Kaggle'}
+            </button>
+          </form>
+
+          {status?.oauthEnabled && (
+            <button
+              type="button"
+              disabled
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100/70"
+            >
+              Connect with Kaggle OAuth (coming soon)
+            </button>
+          )}
+
+          <div className="mt-3 space-y-2">
+            <a
+              href="https://www.kaggle.com/settings"
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-full items-center justify-between rounded-lg bg-[#2c4439] px-3.5 py-2 text-xs font-medium text-white hover:bg-[#385648]"
+            >
+              <span>Get token in Kaggle settings</span>
+              <ExternalLink size={13} className="text-emerald-300" />
+            </a>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading || submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100 hover:bg-white/10 disabled:opacity-60"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh status
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

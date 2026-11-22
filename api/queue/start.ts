@@ -1,9 +1,9 @@
 import { requireUser } from '../../server/auth/session.js';
 import { getRepositories } from '../../server/db/index.js';
-import { HttpError, route } from '../../server/http/responses.js';
+import { HttpError, jsonResponse, readJson, route } from '../../server/http/responses.js';
+import { dispatchNextQueuedJob } from '../../server/jobs/dispatcher.js';
+import { getObjectStorage } from '../../server/storage/index.js';
 
-// Worker creation and Kaggle connection validation belong to Milestones 5–6.
-// Never mark a paused queue RUNNING without actually starting a worker.
 export const POST = route(async (request) => {
   const user = await requireUser(request);
   const repositories = await getRepositories();
@@ -11,8 +11,32 @@ export const POST = route(async (request) => {
     repositories.queue.getStateForUser(user.id),
     repositories.queue.countQueuedForUser(user.id),
   ]);
+
   if (state === 'PAUSING') throw new HttpError(409, 'Stopping current worker.', 'QUEUE_PAUSING');
   if (state === 'RUNNING') throw new HttpError(409, 'Queue is already running.', 'QUEUE_RUNNING');
   if (count === 0) throw new HttpError(409, 'No queued jobs remain.', 'QUEUE_EMPTY');
-  throw new HttpError(503, 'Kaggle worker connection is not available yet.', 'KAGGLE_NOT_CONNECTED');
+
+  const callbackBaseUrl = (process.env.APP_BASE_URL || new URL(request.url).origin).replace(/\/+$/, '');
+  const result = await dispatchNextQueuedJob({
+    userId: user.id,
+    repositories,
+    storage: getObjectStorage(),
+    callbackBaseUrl,
+  });
+
+  return jsonResponse({
+    ...result,
+    queueState: 'RUNNING',
+  });
+});
+
+export const PATCH = route(async (request) => {
+  const user = await requireUser(request);
+  const body = await readJson<{ pauseAfterCurrent?: unknown }>(request);
+  if (typeof body.pauseAfterCurrent !== 'boolean') {
+    throw new HttpError(400, 'pauseAfterCurrent must be a boolean.', 'INVALID_PAUSE_SETTING');
+  }
+  const repositories = await getRepositories();
+  const pauseAfterCurrent = await repositories.queue.setPauseAfterCurrent(user.id, body.pauseAfterCurrent);
+  return jsonResponse({ pauseAfterCurrent });
 });

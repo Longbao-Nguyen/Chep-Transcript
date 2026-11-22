@@ -31,5 +31,11 @@ export interface ObjectStorage {
   ): Promise<unknown>;
   headObject(pathname: string): Promise<StoredObjectMetadata | null>;
   getPrivateObject(pathname: string): Promise<PrivateStoredObject | null>;
+  putPrivateObject(
+    pathname: string,
+    body: string | Buffer | Uint8Array,
+    contentType: string,
+  ): Promise<StoredObjectMetadata>;
+  createSignedDownloadUrl(pathname: string, expiresInMs: number): Promise<string>;
   deleteObject(pathname: string): Promise<void>;
 }

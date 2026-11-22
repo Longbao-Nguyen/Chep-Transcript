@@ -1,7 +1,9 @@
 import type { ClientJob } from '../../types';
-import { uploadPrivateMedia } from './vercelBlobClient';
+import { uploadMediaObject } from './directUploadClient';
 
 interface UploadCallbacks {
+  modelId?: string;
+  language?: string;
   onInitialized(jobId: string): void;
   onProgress(progress: number): void;
   onFinalizing(): void;
@@ -22,14 +24,20 @@ export async function uploadFileDirectly(file: File, callbacks: UploadCallbacks)
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: file.name, size: file.size, contentType }),
+    body: JSON.stringify({
+      filename: file.name,
+      size: file.size,
+      contentType,
+      modelId: callbacks.modelId,
+      language: callbacks.language,
+    }),
   });
   if (!initResponse.ok) throw await responseError(initResponse);
   const init = await initResponse.json() as { jobId: string; uploadPathname: string };
   callbacks.onInitialized(init.jobId);
 
   try {
-    await uploadPrivateMedia({
+    await uploadMediaObject({
       jobId: init.jobId,
       pathname: init.uploadPathname,
       file,

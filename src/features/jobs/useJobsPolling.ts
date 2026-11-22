@@ -21,6 +21,7 @@ export function useJobsPolling(enabled: boolean) {
   const [jobs, setJobs] = useState<ClientJob[]>([]);
   const [queueState, setQueueState] = useState<QueueState>('IDLE');
   const [queuedCount, setQueuedCount] = useState(0);
+  const [pauseAfterCurrent, setPauseAfterCurrent] = useState(false);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,10 +33,16 @@ export function useJobsPolling(enabled: boolean) {
       if (!response.ok || !contentType.includes('application/json')) {
         throw new Error(response.status === 401 ? 'Your session has expired.' : 'Could not load jobs.');
       }
-      const payload = (await response.json()) as { jobs: ClientJob[]; queueState: QueueState; queuedCount: number };
+      const payload = (await response.json()) as {
+        jobs: ClientJob[];
+        queueState: QueueState;
+        queuedCount: number;
+        pauseAfterCurrent?: boolean;
+      };
       setJobs(payload.jobs);
       setQueueState(payload.queueState);
       setQueuedCount(payload.queuedCount);
+      setPauseAfterCurrent(Boolean(payload.pauseAfterCurrent));
       setError(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Could not load jobs.');
@@ -49,6 +56,7 @@ export function useJobsPolling(enabled: boolean) {
       setJobs([]);
       setQueueState('IDLE');
       setQueuedCount(0);
+      setPauseAfterCurrent(false);
       setLoading(false);
       return;
     }
@@ -63,5 +71,5 @@ export function useJobsPolling(enabled: boolean) {
     return () => window.clearTimeout(timer);
   }, [delay, enabled, refresh]);
 
-  return { jobs, queueState, queuedCount, loading, error, refresh };
+  return { jobs, queueState, queuedCount, pauseAfterCurrent, loading, error, refresh };
 }

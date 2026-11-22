@@ -16,3 +16,11 @@ export function createSourceObjectPathname(userId: string, jobId: string, filena
 export function createOutputObjectPathname(userId: string, jobId: string): string {
   return `users/${userId}/jobs/${jobId}/output/transcript.txt`;
 }
+
+export function createSubtitleObjectPathname(userId: string, jobId: string): string {
+  return `users/${userId}/jobs/${jobId}/output/transcript.srt`;
+}
+
+export function createShardObjectPathname(userId: string, jobId: string, shardIndex: 0 | 1): string {
+  return `users/${userId}/jobs/${jobId}/shards/shard-${shardIndex}.json`;
+}

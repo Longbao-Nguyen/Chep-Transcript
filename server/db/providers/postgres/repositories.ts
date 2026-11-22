@@ -1,23 +1,29 @@
 import type { Sql } from 'postgres';
 
 import { createId } from '../../ids.js';
-import type {
-  Job,
-  CancellationResult,
-  JobPatch,
-  JobRepository,
-  ListJobOptions,
-  NewJob,
-  QueueRepository,
-  QueueState,
-  Repositories,
-  UpsertGoogleUserInput,
-  User,
-  UserRepository,
-  UserSettings,
-  UserSettingsRepository,
-  WorkerRepository,
-  WorkerState,
+import {
+  TERMINAL_JOB_STATUSES,
+  type CancellationResult,
+  type Job,
+  type JobPatch,
+  type JobRepository,
+  type KaggleAuthMode,
+  type KaggleCredentialsRecord,
+  type KaggleCredentialsRepository,
+  type KaggleGpuStatus,
+  type ListJobOptions,
+  type NewJob,
+  type QueueRepository,
+  type QueueState,
+  type Repositories,
+  type UpsertGoogleUserInput,
+  type UpsertKaggleCredentialsInput,
+  type User,
+  type UserRepository,
+  type UserSettings,
+  type UserSettingsRepository,
+  type WorkerRepository,
+  type WorkerState,
 } from '../../interface.js';
 import { getPostgresClient } from './client.js';
 
@@ -49,8 +55,11 @@ function mapJob(row: Row): Job {
     originalFilename: String(row.original_filename),
     sourceObjectKey: String(row.source_object_key),
     outputObjectKey: row.output_object_key == null ? null : String(row.output_object_key),
+    srtObjectKey: row.srt_object_key == null ? null : String(row.srt_object_key),
     contentType: String(row.content_type),
     fileSizeBytes: Number(row.file_size_bytes),
+    modelId: row.model_id == null ? 'bofenghuang/whisper-large-v3-french-distil-dec16' : String(row.model_id),
+    language: row.language == null ? 'fr' : String(row.language),
     status: row.status as Job['status'],
     progress: row.progress == null ? null : Number(row.progress),
     durationSec: row.duration_sec == null ? null : Number(row.duration_sec),
@@ -64,6 +73,31 @@ function mapJob(row: Row): Job {
     completedAt: asNullableDate(row.completed_at),
     expiresAt: asNullableDate(row.expires_at),
     workerRunId: row.worker_run_id == null ? null : String(row.worker_run_id),
+    callbackTokenHash: row.callback_token_hash == null ? null : String(row.callback_token_hash),
+    callbackTokenExpiresAt: asNullableDate(row.callback_token_expires_at),
+    kaggleKernelRef: row.kaggle_kernel_ref == null ? null : String(row.kaggle_kernel_ref),
+    kaggleShard1Ref: row.kaggle_shard1_ref == null ? null : String(row.kaggle_shard1_ref),
+    dualMode: Boolean(row.dual_mode),
+    shard0Done: Boolean(row.shard0_done),
+    shard1Done: Boolean(row.shard1_done),
+    storageCleanedAt: asNullableDate(row.storage_cleaned_at),
+  };
+}
+
+function mapKaggleCredentials(row: Row): KaggleCredentialsRecord {
+  return {
+    userId: String(row.user_id),
+    authMode: row.auth_mode as KaggleAuthMode,
+    kaggleUsername: row.kaggle_username == null ? null : String(row.kaggle_username),
+    encryptedToken: String(row.encrypted_token),
+    tokenIv: String(row.token_iv),
+    tokenAuthTag: String(row.token_auth_tag),
+    gpuStatus: (row.gpu_status ?? 'unchecked') as KaggleGpuStatus,
+    gpuMessage: row.gpu_message == null ? null : String(row.gpu_message),
+    gpuCheckedAt: asNullableDate(row.gpu_checked_at),
+    gpuProbeRef: row.gpu_probe_ref == null ? null : String(row.gpu_probe_ref),
+    connectedAt: asDate(row.connected_at),
+    updatedAt: asDate(row.updated_at),
   };
 }
 
@@ -115,6 +149,7 @@ const PATCH_COLUMNS: Record<keyof JobPatch, string> = {
   durationSec: 'duration_sec',
   processedAudioSec: 'processed_audio_sec',
   outputObjectKey: 'output_object_key',
+  srtObjectKey: 'srt_object_key',
   errorCode: 'error_code',
   errorMessage: 'error_message',
   uploadCompletedAt: 'upload_completed_at',
@@ -122,6 +157,14 @@ const PATCH_COLUMNS: Record<keyof JobPatch, string> = {
   completedAt: 'completed_at',
   expiresAt: 'expires_at',
   workerRunId: 'worker_run_id',
+  callbackTokenHash: 'callback_token_hash',
+  callbackTokenExpiresAt: 'callback_token_expires_at',
+  kaggleKernelRef: 'kaggle_kernel_ref',
+  kaggleShard1Ref: 'kaggle_shard1_ref',
+  dualMode: 'dual_mode',
+  shard0Done: 'shard0_done',
+  shard1Done: 'shard1_done',
+  storageCleanedAt: 'storage_cleaned_at',
 };
 
 class PostgresJobRepository implements JobRepository {
@@ -131,14 +174,19 @@ class PostgresJobRepository implements JobRepository {
     const rows = await this.sql`
       insert into jobs (
         id, user_id, original_filename, source_object_key, content_type,
-        file_size_bytes, status, progress
+        file_size_bytes, model_id, language, status, progress
       ) values (
         ${input.id}, ${input.userId}, ${input.originalFilename}, ${input.sourceObjectKey},
-        ${input.contentType}, ${input.fileSizeBytes}, ${input.status}, 0
+        ${input.contentType}, ${input.fileSizeBytes}, ${input.modelId}, ${input.language}, ${input.status}, 0
       )
       returning *
     `;
     return mapJob(rows[0] as Row);
+  }
+
+  async getById(jobId: string): Promise<Job | null> {
+    const rows = await this.sql`select * from jobs where id = ${jobId} limit 1`;
+    return rows[0] ? mapJob(rows[0] as Row) : null;
   }
 
   async getByIdForUser(jobId: string, userId: string): Promise<Job | null> {
@@ -168,6 +216,10 @@ class PostgresJobRepository implements JobRepository {
     if (entries.length === 0) return this.getByIdForUser(jobId, userId);
 
     const update = Object.fromEntries(entries.map(([key, value]) => [PATCH_COLUMNS[key], value]));
+    if (patch.status && TERMINAL_JOB_STATUSES.includes(patch.status)) {
+      update.callback_token_hash = null;
+      update.callback_token_expires_at = null;
+    }
     update.updated_at = new Date();
 
     const rows = expectedStatus
@@ -183,7 +235,7 @@ class PostgresJobRepository implements JobRepository {
       if (queue[0]?.state !== 'RUNNING') return null;
       const rows = await transaction`
         update jobs set
-          status = 'PREPROCESSING',
+          status = 'WORKER_STARTING',
           worker_run_id = ${workerRunId},
           started_at = coalesce(started_at, now()),
           updated_at = now()
@@ -200,6 +252,137 @@ class PostgresJobRepository implements JobRepository {
     });
   }
 
+  async startQueueAndClaimNextJob(userId: string, workerRunId: string): Promise<Job | null> {
+    return this.sql.begin(async (transaction) => {
+      await transaction`insert into user_queue_state (user_id) values (${userId}) on conflict do nothing`;
+      const queue = await transaction`select state from user_queue_state where user_id = ${userId} for update`;
+      const state = (queue[0]?.state ?? 'IDLE') as QueueState;
+      if (state !== 'IDLE' && state !== 'PAUSED') return null;
+
+      const rows = await transaction`
+        update jobs set
+          status = 'WORKER_STARTING',
+          worker_run_id = ${workerRunId},
+          started_at = coalesce(started_at, now()),
+          updated_at = now()
+        where id = (
+          select id from jobs
+          where user_id = ${userId} and status = 'QUEUED'
+          order by created_at asc
+          for update skip locked
+          limit 1
+        )
+        returning *
+      `;
+      if (!rows[0]) return null;
+
+      await transaction`
+        update user_queue_state set state = 'RUNNING', updated_at = now()
+        where user_id = ${userId}
+      `;
+      return mapJob(rows[0] as Row);
+    });
+  }
+
+  async listStalledKaggleJobs(olderThan: Date): Promise<Job[]> {
+    const rows = await this.sql`
+      select * from jobs
+      where status in ('WORKER_STARTING', 'PROCESSING', 'PREPROCESSING', 'TRANSCRIBING', 'FINALIZING', 'CANCEL_REQUESTED')
+        and updated_at < ${olderThan}
+        and kaggle_kernel_ref is not null
+      order by updated_at asc
+      limit 100
+    `;
+    return rows.map((row) => mapJob(row as Row));
+  }
+
+  async listAbandonedUploads(olderThan: Date): Promise<Job[]> {
+    const rows = await this.sql`
+      select * from jobs
+      where status in ('CREATED', 'UPLOADING')
+        and updated_at < ${olderThan}
+        and storage_cleaned_at is null
+      order by updated_at asc
+      limit 100
+    `;
+    return rows.map((row) => mapJob(row as Row));
+  }
+
+  async listRetentionExpiredJobs(retentionCutoff: Date, now: Date): Promise<Job[]> {
+    const rows = await this.sql`
+      select * from jobs
+      where storage_cleaned_at is null
+        and (
+          (status = 'COMPLETED' and ((expires_at is not null and expires_at <= ${now}) or coalesce(completed_at, updated_at) < ${retentionCutoff}))
+          or (status in ('CANCELLED', 'EXPIRED', 'FAILED_UPLOAD', 'FAILED_WORKER_START', 'FAILED_MEDIA', 'FAILED_INFERENCE', 'FAILED_OUTPUT') and coalesce(completed_at, updated_at) < ${retentionCutoff})
+        )
+      order by updated_at asc
+      limit 100
+    `;
+    return rows.map((row) => mapJob(row as Row));
+  }
+
+  async updateProgressForWorker(
+    jobId: string,
+    userId: string,
+    workerRunId: string,
+    patch: {
+      status: 'PREPROCESSING' | 'TRANSCRIBING' | 'FINALIZING';
+      progress?: number | null;
+      durationSec?: number | null;
+      processedAudioSec?: number | null;
+    },
+  ): Promise<Job | null> {
+    const rows = await this.sql`
+      update jobs set
+        status = ${patch.status},
+        progress = coalesce(${patch.progress ?? null}, progress),
+        duration_sec = coalesce(${patch.durationSec ?? null}, duration_sec),
+        processed_audio_sec = coalesce(${patch.processedAudioSec ?? null}, processed_audio_sec),
+        updated_at = now()
+      where id = ${jobId}
+        and user_id = ${userId}
+        and worker_run_id = ${workerRunId}
+        and status in ('WORKER_STARTING', 'PROCESSING', 'PREPROCESSING', 'TRANSCRIBING', 'FINALIZING')
+      returning *
+    `;
+    return rows[0] ? mapJob(rows[0] as Row) : null;
+  }
+
+  async failForWorker(
+    jobId: string,
+    userId: string,
+    workerRunId: string,
+    errorCode: 'FAILED_WORKER_START' | 'FAILED_MEDIA' | 'FAILED_INFERENCE' | 'FAILED_OUTPUT',
+    errorMessage: string,
+  ): Promise<Job | null> {
+    return this.sql.begin(async (transaction) => {
+      const queueRows = await transaction`select state from user_queue_state where user_id = ${userId} for update`;
+      const rows = await transaction`
+        update jobs set
+          status = ${errorCode},
+          error_code = ${errorCode},
+          error_message = ${errorMessage},
+          completed_at = now(),
+          callback_token_hash = null,
+          callback_token_expires_at = null,
+          updated_at = now()
+        where id = ${jobId}
+          and user_id = ${userId}
+          and worker_run_id = ${workerRunId}
+          and status in ('WORKER_STARTING', 'PROCESSING', 'PREPROCESSING', 'TRANSCRIBING', 'FINALIZING', 'CANCEL_REQUESTED')
+        returning *
+      `;
+      if (!rows[0]) return null;
+      if (queueRows[0]?.state === 'RUNNING' || queueRows[0]?.state === 'PAUSING') {
+        const queued = await transaction`select count(*)::int as count from jobs where user_id = ${userId} and status = 'QUEUED'`;
+        const nextState: QueueState = Number(queued[0].count) > 0 ? 'PAUSED' : 'IDLE';
+        await transaction`update user_queue_state set state = ${nextState}, pause_after_current = false, updated_at = now() where user_id = ${userId}`;
+      }
+      return mapJob(rows[0] as Row);
+    });
+  }
+
   async cancelForUser(jobId: string, userId: string): Promise<CancellationResult | null> {
     return this.sql.begin(async (transaction) => {
       await transaction`insert into user_queue_state (user_id) values (${userId}) on conflict do nothing`;
@@ -210,17 +393,68 @@ class PostgresJobRepository implements JobRepository {
       const queueState = queueRows[0].state as QueueState;
       if (job.status === 'CANCELLED' || job.status === 'CANCEL_REQUESTED') return { job, queueState };
       if (job.status === 'QUEUED') {
-        const updated = await transaction`update jobs set status = 'CANCELLED', completed_at = now(), updated_at = now() where id = ${jobId} returning *`;
+        const updated = await transaction`
+          update jobs set
+            status = 'CANCELLED',
+            completed_at = now(),
+            callback_token_hash = null,
+            callback_token_expires_at = null,
+            updated_at = now()
+          where id = ${jobId}
+          returning *
+        `;
         return { job: mapJob(updated[0] as Row), queueState };
       }
       if (['PROCESSING', 'WORKER_STARTING', 'PREPROCESSING', 'TRANSCRIBING', 'FINALIZING'].includes(job.status)) {
         if (queueState !== 'RUNNING') throw new Error('Active job has no running queue.');
         const updated = await transaction`update jobs set status = 'CANCEL_REQUESTED', updated_at = now() where id = ${jobId} returning *`;
-        await transaction`update user_queue_state set state = 'PAUSING', updated_at = now() where user_id = ${userId}`;
+        await transaction`update user_queue_state set state = 'PAUSING', pause_after_current = false, updated_at = now() where user_id = ${userId}`;
         return { job: mapJob(updated[0] as Row), queueState: 'PAUSING' };
       }
       return { job, queueState };
     });
+  }
+
+  async retryForUser(jobId: string, userId: string): Promise<Job | null> {
+    const rows = await this.sql`
+      update jobs set
+        status = 'QUEUED',
+        progress = 0,
+        duration_sec = null,
+        processed_audio_sec = null,
+        output_object_key = null,
+        srt_object_key = null,
+        error_code = null,
+        error_message = null,
+        started_at = null,
+        completed_at = null,
+        expires_at = null,
+        worker_run_id = null,
+        callback_token_hash = null,
+        callback_token_expires_at = null,
+        kaggle_kernel_ref = null,
+        kaggle_shard1_ref = null,
+        dual_mode = false,
+        shard0_done = false,
+        shard1_done = false,
+        updated_at = now()
+      where id = ${jobId}
+        and user_id = ${userId}
+        and status in ('FAILED_UPLOAD', 'FAILED_WORKER_START', 'FAILED_MEDIA', 'FAILED_INFERENCE', 'FAILED_OUTPUT', 'CANCELLED')
+      returning *
+    `;
+    return rows[0] ? mapJob(rows[0] as Row) : null;
+  }
+
+  async deleteForUser(jobId: string, userId: string): Promise<Job | null> {
+    const rows = await this.sql`
+      delete from jobs
+      where id = ${jobId}
+        and user_id = ${userId}
+        and status in ('COMPLETED', 'FAILED_UPLOAD', 'FAILED_WORKER_START', 'FAILED_MEDIA', 'FAILED_INFERENCE', 'FAILED_OUTPUT', 'CANCELLED', 'EXPIRED')
+      returning *
+    `;
+    return rows[0] ? mapJob(rows[0] as Row) : null;
   }
 
   async acknowledgeCancellation(jobId: string, userId: string, workerRunId: string): Promise<CancellationResult | null> {
@@ -232,26 +466,91 @@ class PostgresJobRepository implements JobRepository {
       const queueState = (queueRows[0]?.state ?? 'IDLE') as QueueState;
       if (job.workerRunId !== workerRunId || !workerRunId) return { job, queueState };
       if (job.status === 'CANCEL_REQUESTED' && queueState === 'PAUSING') {
-        const updated = await transaction`update jobs set status = 'CANCELLED', completed_at = now(), updated_at = now() where id = ${jobId} returning *`;
-        await transaction`update user_queue_state set state = 'PAUSED', updated_at = now() where user_id = ${userId}`;
+        const updated = await transaction`
+          update jobs set
+            status = 'CANCELLED',
+            completed_at = now(),
+            callback_token_hash = null,
+            callback_token_expires_at = null,
+            updated_at = now()
+          where id = ${jobId}
+          returning *
+        `;
+        await transaction`update user_queue_state set state = 'PAUSED', pause_after_current = false, updated_at = now() where user_id = ${userId}`;
         return { job: mapJob(updated[0] as Row), queueState: 'PAUSED' };
       }
       return { job, queueState };
     });
   }
 
-  async completeForWorker(jobId: string, userId: string, workerRunId: string, outputObjectKey: string): Promise<Job | null> {
+  async recordShardForWorker(
+    jobId: string,
+    userId: string,
+    workerRunId: string,
+    shardIndex: 0 | 1,
+    durationSec?: number | null,
+  ): Promise<Job | null> {
     return this.sql.begin(async (transaction) => {
-      const queueRows = await transaction`select state from user_queue_state where user_id = ${userId} for update`;
-      if (queueRows[0]?.state !== 'RUNNING') return null;
       const rows = await transaction`
-        update jobs set status = 'COMPLETED', output_object_key = ${outputObjectKey},
-          progress = 1, completed_at = now(), expires_at = now() + interval '7 days', updated_at = now()
+        update jobs set
+          shard0_done = case when ${shardIndex} = 0 then true else shard0_done end,
+          shard1_done = case when ${shardIndex} = 1 then true else shard1_done end,
+          duration_sec = coalesce(${durationSec ?? null}, duration_sec),
+          status = 'FINALIZING',
+          progress = 0.96,
+          updated_at = now()
+        where id = ${jobId}
+          and user_id = ${userId}
+          and worker_run_id = ${workerRunId}
+          and status in ('WORKER_STARTING', 'PROCESSING', 'PREPROCESSING', 'TRANSCRIBING', 'FINALIZING')
+        returning *
+      `;
+      return rows[0] ? mapJob(rows[0] as Row) : null;
+    });
+  }
+
+  async completeForWorker(
+    jobId: string,
+    userId: string,
+    workerRunId: string,
+    outputObjectKey: string,
+    options?: {
+      srtObjectKey?: string | null;
+      expiresAt?: Date;
+      durationSec?: number | null;
+      processedAudioSec?: number | null;
+    },
+  ): Promise<Job | null> {
+    return this.sql.begin(async (transaction) => {
+      const queueRows = await transaction`select state, pause_after_current from user_queue_state where user_id = ${userId} for update`;
+      if (queueRows[0]?.state !== 'RUNNING') return null;
+      const pauseAfterCurrent = Boolean(queueRows[0]?.pause_after_current);
+      const expiresAt = options?.expiresAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const rows = await transaction`
+        update jobs set
+          status = 'COMPLETED',
+          output_object_key = ${outputObjectKey},
+          srt_object_key = ${options?.srtObjectKey ?? null},
+          progress = 1,
+          duration_sec = coalesce(${options?.durationSec ?? null}, duration_sec),
+          processed_audio_sec = coalesce(${options?.processedAudioSec ?? null}, processed_audio_sec),
+          completed_at = now(),
+          expires_at = ${expiresAt},
+          callback_token_hash = null,
+          callback_token_expires_at = null,
+          updated_at = now()
         where id = ${jobId} and user_id = ${userId} and worker_run_id = ${workerRunId}
           and status = 'FINALIZING'
         returning *
       `;
-      return rows[0] ? mapJob(rows[0] as Row) : null;
+      if (!rows[0]) return null;
+      const queued = await transaction`select count(*)::int as count from jobs where user_id = ${userId} and status = 'QUEUED'`;
+      const queuedCount = Number(queued[0].count);
+      if (pauseAfterCurrent || queuedCount === 0) {
+        const nextState: QueueState = queuedCount > 0 ? 'PAUSED' : 'IDLE';
+        await transaction`update user_queue_state set state = ${nextState}, pause_after_current = false, updated_at = now() where user_id = ${userId}`;
+      }
+      return mapJob(rows[0] as Row);
     });
   }
 }
@@ -262,6 +561,33 @@ class PostgresQueueRepository implements QueueRepository {
   async getStateForUser(userId: string): Promise<QueueState> {
     const rows = await this.sql`select state from user_queue_state where user_id = ${userId}`;
     return (rows[0]?.state ?? 'IDLE') as QueueState;
+  }
+
+  async setQueueState(userId: string, state: QueueState): Promise<void> {
+    await this.sql`
+      insert into user_queue_state (user_id, state)
+      values (${userId}, ${state})
+      on conflict (user_id) do update set
+        state = excluded.state,
+        updated_at = now()
+    `;
+  }
+
+  async getPauseAfterCurrent(userId: string): Promise<boolean> {
+    const rows = await this.sql`select pause_after_current from user_queue_state where user_id = ${userId}`;
+    return Boolean(rows[0]?.pause_after_current);
+  }
+
+  async setPauseAfterCurrent(userId: string, value: boolean): Promise<boolean> {
+    const rows = await this.sql`
+      insert into user_queue_state (user_id, pause_after_current)
+      values (${userId}, ${value})
+      on conflict (user_id) do update set
+        pause_after_current = excluded.pause_after_current,
+        updated_at = now()
+      returning pause_after_current
+    `;
+    return Boolean(rows[0]?.pause_after_current);
   }
 
   async countQueuedForUser(userId: string): Promise<number> {
@@ -343,6 +669,69 @@ class PostgresUserSettingsRepository implements UserSettingsRepository {
   }
 }
 
+class PostgresKaggleCredentialsRepository implements KaggleCredentialsRepository {
+  constructor(private readonly sql: Sql) {}
+
+  async getKaggleCredentials(userId: string): Promise<KaggleCredentialsRecord | null> {
+    const rows = await this.sql`
+      select * from user_kaggle_credentials where user_id = ${userId} limit 1
+    `;
+    return rows[0] ? mapKaggleCredentials(rows[0] as Row) : null;
+  }
+
+  async upsertKaggleCredentials(input: UpsertKaggleCredentialsInput): Promise<KaggleCredentialsRecord> {
+    const rows = await this.sql`
+      insert into user_kaggle_credentials (
+        user_id, auth_mode, kaggle_username, encrypted_token, token_iv, token_auth_tag,
+        gpu_status, gpu_message, gpu_checked_at, gpu_probe_ref
+      ) values (
+        ${input.userId}, ${input.authMode}, ${input.kaggleUsername},
+        ${input.encryptedToken}, ${input.tokenIv}, ${input.tokenAuthTag},
+        'unchecked', null, null, null
+      )
+      on conflict (user_id) do update set
+        auth_mode = excluded.auth_mode,
+        kaggle_username = excluded.kaggle_username,
+        encrypted_token = excluded.encrypted_token,
+        token_iv = excluded.token_iv,
+        token_auth_tag = excluded.token_auth_tag,
+        gpu_status = 'unchecked',
+        gpu_message = null,
+        gpu_checked_at = null,
+        gpu_probe_ref = null,
+        updated_at = now()
+      returning *
+    `;
+    return mapKaggleCredentials(rows[0] as Row);
+  }
+
+  async updateGpuCheck(
+    userId: string,
+    patch: {
+      gpuStatus: KaggleGpuStatus;
+      gpuMessage: string | null;
+      gpuCheckedAt?: Date | null;
+      gpuProbeRef?: string | null;
+    },
+  ): Promise<KaggleCredentialsRecord | null> {
+    const rows = await this.sql`
+      update user_kaggle_credentials set
+        gpu_status = ${patch.gpuStatus},
+        gpu_message = ${patch.gpuMessage},
+        gpu_checked_at = ${patch.gpuCheckedAt ?? null},
+        gpu_probe_ref = ${patch.gpuProbeRef ?? null},
+        updated_at = now()
+      where user_id = ${userId}
+      returning *
+    `;
+    return rows[0] ? mapKaggleCredentials(rows[0] as Row) : null;
+  }
+
+  async deleteKaggleCredentials(userId: string): Promise<void> {
+    await this.sql`delete from user_kaggle_credentials where user_id = ${userId}`;
+  }
+}
+
 export function createPostgresRepositories(sql = getPostgresClient()): Repositories {
   return {
     users: new PostgresUserRepository(sql),
@@ -350,5 +739,6 @@ export function createPostgresRepositories(sql = getPostgresClient()): Repositor
     queue: new PostgresQueueRepository(sql),
     workers: new PostgresWorkerRepository(sql),
     settings: new PostgresUserSettingsRepository(sql),
+    kaggleCredentials: new PostgresKaggleCredentialsRepository(sql),
   };
 }

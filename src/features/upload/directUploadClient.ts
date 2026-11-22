@@ -1,16 +1,16 @@
 import { uploadPresigned } from '@vercel/blob/client';
 
-export async function uploadPrivateMedia(input: {
+export async function uploadMediaObject(input: {
   jobId: string;
   pathname: string;
   file: File;
   contentType: string;
   onProgress(progress: number): void;
 }): Promise<void> {
-  const blob = await uploadPresigned(input.pathname, input.file, {
+  const uploaded = await uploadPresigned(input.pathname, input.file, {
     access: 'private',
     contentType: input.contentType,
-    handleUploadUrl: '/api/uploads/blob',
+    handleUploadUrl: '/api/uploads/direct',
     clientPayload: JSON.stringify({ jobId: input.jobId }),
     multipart: true,
     onUploadProgress: ({ loaded, total }) => {
@@ -18,7 +18,7 @@ export async function uploadPrivateMedia(input: {
     },
   });
 
-  if (blob.pathname !== input.pathname) {
+  if (uploaded.pathname !== input.pathname) {
     throw new Error('Object storage returned an unexpected pathname.');
   }
 }

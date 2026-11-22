@@ -4,10 +4,38 @@ import test from 'node:test';
 import { HttpError } from '../../server/http/responses';
 import { validateUploadInit } from '../../server/uploads/validation';
 
-test('upload metadata accepts opaque browser media', () => {
+test('upload metadata accepts opaque browser media and resolves default model/language', () => {
   assert.deepEqual(
     validateUploadInit({ filename: 'lecture.unsupported-container', size: 123, contentType: '' }),
-    { filename: 'lecture.unsupported-container', size: 123, contentType: 'application/octet-stream' },
+    {
+      filename: 'lecture.unsupported-container',
+      size: 123,
+      contentType: 'application/octet-stream',
+      modelId: 'bofenghuang/whisper-large-v3-french-distil-dec16',
+      language: 'fr',
+    },
+  );
+
+  assert.deepEqual(
+    validateUploadInit({ filename: 'talk.mp3', size: 512, contentType: 'audio/mpeg', language: 'vi' }),
+    {
+      filename: 'talk.mp3',
+      size: 512,
+      contentType: 'audio/mpeg',
+      modelId: 'vinai/PhoWhisper-medium',
+      language: 'vi',
+    },
+  );
+});
+
+test('upload metadata rejects unsupported modelId or language with 400', () => {
+  assert.throws(
+    () => validateUploadInit({ filename: 'a.mp3', size: 100, contentType: 'audio/mpeg', language: 'zz' }),
+    (error: unknown) => error instanceof HttpError && error.status === 400,
+  );
+  assert.throws(
+    () => validateUploadInit({ filename: 'a.mp3', size: 100, contentType: 'audio/mpeg', modelId: 'invalid/model' }),
+    (error: unknown) => error instanceof HttpError && error.status === 400,
   );
 });
 

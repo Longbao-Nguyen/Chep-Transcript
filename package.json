@@ -5,12 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:legacy": "tsx server.ts",
     "build": "vite build",
-    "build:legacy": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=dist/server.mjs",
-    "start:legacy": "node dist/server.mjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "db:migrate": "tsx scripts/migrate.ts",

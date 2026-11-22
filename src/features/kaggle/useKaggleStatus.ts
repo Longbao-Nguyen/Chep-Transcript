@@ -1,13 +1,36 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export interface KaggleAvailability {
+export interface KaggleStatus {
+  connected: boolean;
   available: boolean;
+  authMode: 'api_token' | 'oauth2' | null;
+  username: string | null;
+  oauthEnabled: boolean;
+  gpuStatus?: 'unchecked' | 'checking' | 'ready' | 'error';
+  gpuMessage?: string | null;
+  gpuCheckedAt?: string | null;
+  connectedAt: string | null;
   message: string;
 }
 
+export interface ConnectKaggleInput {
+  apiToken: string;
+  username?: string;
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json() as { error?: { message?: string } };
+    return payload.error?.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function useKaggleStatus(enabled: boolean) {
-  const [status, setStatus] = useState<KaggleAvailability | null>(null);
+  const [status, setStatus] = useState<KaggleStatus | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -15,10 +38,10 @@ export function useKaggleStatus(enabled: boolean) {
     setLoading(true);
     try {
       const response = await fetch('/api/kaggle/status', { credentials: 'same-origin', signal });
-      if (!response.ok) throw new Error('Could not check online GPU availability.');
-      const payload = await response.json() as KaggleAvailability;
-      if (typeof payload.available !== 'boolean' || typeof payload.message !== 'string') {
-        throw new Error('Invalid GPU status response.');
+      if (!response.ok) throw new Error(await readApiError(response, 'Could not check Kaggle connection status.'));
+      const payload = await response.json() as KaggleStatus;
+      if (typeof payload.connected !== 'boolean' || typeof payload.message !== 'string') {
+        throw new Error('Invalid Kaggle status response.');
       }
       if (!signal?.aborted) {
         setStatus(payload);
@@ -27,12 +50,82 @@ export function useKaggleStatus(enabled: boolean) {
     } catch (cause) {
       if (!signal?.aborted) {
         setStatus(null);
-        setError(cause instanceof Error ? cause.message : 'Could not check online GPU availability.');
+        setError(cause instanceof Error ? cause.message : 'Could not check Kaggle connection status.');
       }
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
   }, [enabled]);
+
+  const connect = useCallback(async (input: ConnectKaggleInput) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/kaggle/connect', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Could not connect Kaggle account.'));
+      }
+      const payload = await response.json() as KaggleStatus;
+      setStatus(payload);
+      setError(null);
+      return payload;
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
+  const checkGpu = useCallback(async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/kaggle/gpu-check', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Could not start Kaggle GPU check.'));
+      }
+      const payload = await response.json() as KaggleStatus;
+      setStatus(payload);
+      setError(null);
+      return payload;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not start Kaggle GPU check.';
+      setError(message);
+      throw cause;
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
+
+  const disconnect = useCallback(async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/kaggle/disconnect', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(await readApiError(response, 'Could not disconnect Kaggle account.'));
+      }
+      const payload = await response.json() as KaggleStatus;
+      setStatus(payload);
+      setError(null);
+      return payload;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not disconnect Kaggle account.';
+      setError(message);
+      throw cause;
+    } finally {
+      setSubmitting(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -41,5 +134,11 @@ export function useKaggleStatus(enabled: boolean) {
     return () => controller.abort();
   }, [enabled, refresh]);
 
-  return { status, loading, error, refresh };
+  useEffect(() => {
+    if (!enabled || status?.gpuStatus !== 'checking') return;
+    const timer = window.setTimeout(() => void refresh(), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [enabled, refresh, status?.gpuStatus]);
+
+  return { status, loading, submitting, error, refresh, connect, checkGpu, disconnect };
 }

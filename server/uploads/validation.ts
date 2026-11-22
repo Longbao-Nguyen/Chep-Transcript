@@ -1,9 +1,12 @@
 import { HttpError } from '../http/responses.js';
+import { resolveModelAndLanguage } from '../models/catalog.js';
 
 export interface UploadInitInput {
   filename: string;
   size: number;
   contentType: string;
+  modelId: string;
+  language: string;
 }
 
 export function getMaxUploadBytes(): number {
@@ -34,9 +37,15 @@ export function validateUploadInit(value: unknown): UploadInitInput {
   const contentType = typeof input.contentType === 'string' && input.contentType.length <= 255
     ? input.contentType.trim()
     : '';
+  const resolved = resolveModelAndLanguage({
+    modelId: input.modelId,
+    language: input.language,
+  });
   return {
     filename,
     size: Number(input.size),
     contentType: contentType || 'application/octet-stream',
+    modelId: resolved.modelId,
+    language: resolved.language,
   };
 }

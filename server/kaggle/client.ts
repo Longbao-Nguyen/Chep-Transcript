@@ -1,0 +1,304 @@
+import { HttpError } from '../http/responses.js';
+
+const DEFAULT_KAGGLE_API_BASE_URL = 'https://www.kaggle.com/api/v1';
+
+export interface KaggleClientOptions {
+  fetchFn?: typeof fetch;
+  baseUrl?: string;
+}
+
+export interface VerifyCredentialsResult {
+  valid: boolean;
+  username: string | null;
+  error?: string;
+}
+
+export interface PushKernelInput {
+  slug: string;
+  title?: string;
+  notebook: Record<string, unknown>;
+  datasetDataSources?: string[];
+  enableGpu?: boolean;
+  enableInternet?: boolean;
+  accelerator?: string;
+}
+
+export interface PushKernelResult {
+  ref: string;
+  url: string | null;
+  versionNumber: number | null;
+}
+
+export type NormalizedKernelStatus =
+  | 'queued'
+  | 'running'
+  | 'complete'
+  | 'error'
+  | 'cancelAcknowledged'
+  | 'unknown';
+
+export interface KernelStatusResult {
+  status: NormalizedKernelStatus;
+  rawStatus: string | null;
+  failureMessage: string | null;
+}
+
+export interface CancelKernelResult {
+  cancelled: boolean;
+  method: 'cancel' | 'delete';
+}
+
+function splitKernelRef(kernelRef: string): { owner: string; slug: string } {
+  const parts = kernelRef.split('/');
+  if (parts.length !== 2 || !/^[a-zA-Z0-9_-]+$/.test(parts[0]) || !/^[a-zA-Z0-9_-]+$/.test(parts[1])) {
+    throw new HttpError(400, 'Invalid Kaggle kernel reference.', 'INVALID_KERNEL_REF');
+  }
+  return { owner: parts[0], slug: parts[1] };
+}
+
+function getFetch(options: KaggleClientOptions): typeof fetch {
+  return options.fetchFn ?? globalThis.fetch;
+}
+
+function getBaseUrl(options: KaggleClientOptions): string {
+  return (options.baseUrl ?? DEFAULT_KAGGLE_API_BASE_URL).replace(/\/+$/, '');
+}
+
+async function readJsonSafe(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeKaggleKernelStatus(raw: unknown): NormalizedKernelStatus {
+  if (typeof raw !== 'string' || !raw.trim()) return 'unknown';
+  const cleaned = raw.trim().replace(/^KernelWorkerStatus\./i, '').toLowerCase();
+  if (cleaned === 'queued' || cleaned === 'pending') return 'queued';
+  if (cleaned === 'running') return 'running';
+  if (cleaned === 'complete' || cleaned === 'completed') return 'complete';
+  if (cleaned === 'error' || cleaned === 'failed') return 'error';
+  if (cleaned === 'cancelacknowledged' || cleaned === 'cancel_acknowledged' || cleaned === 'cancelled') {
+    return 'cancelAcknowledged';
+  }
+  return 'unknown';
+}
+
+export async function verifyCredentials(
+  headers: Record<string, string>,
+  expectedUsername?: string | null,
+  options: KaggleClientOptions = {},
+): Promise<VerifyCredentialsResult> {
+  const fetchFn = getFetch(options);
+  const url = `${getBaseUrl(options)}/kernels/list?mine=true&pageSize=1`;
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: 'GET',
+      headers: { ...headers, Accept: 'application/json' },
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API to verify credentials.', 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return {
+      valid: false,
+      username: null,
+      error: 'Kaggle rejected these API credentials. Check your token and try again.',
+    };
+  }
+
+  if (!response.ok) {
+    throw new HttpError(502, `Kaggle API returned status ${response.status}.`, 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  const payload = await readJsonSafe(response);
+  let inferredUsername: string | null = expectedUsername ?? null;
+  if (!inferredUsername && Array.isArray(payload) && payload.length > 0) {
+    const first = payload[0] as { ref?: unknown; author?: unknown };
+    if (typeof first.ref === 'string' && first.ref.includes('/')) {
+      inferredUsername = first.ref.split('/')[0] || null;
+    } else if (typeof first.author === 'string' && first.author.trim()) {
+      inferredUsername = first.author.trim();
+    }
+  }
+
+  return {
+    valid: true,
+    username: inferredUsername,
+  };
+}
+
+export async function pushKernel(
+  headers: Record<string, string>,
+  input: PushKernelInput,
+  options: KaggleClientOptions = {},
+): Promise<PushKernelResult> {
+  const { slug: shortSlug } = splitKernelRef(input.slug);
+  const fetchFn = getFetch(options);
+  const url = `${getBaseUrl(options)}/kernels/push`;
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        slug: input.slug,
+        newTitle: input.title ?? shortSlug,
+        text: JSON.stringify(input.notebook),
+        language: 'python',
+        kernelType: 'notebook',
+        isPrivate: true,
+        enableGpu: input.enableGpu ?? true,
+        enableTpu: false,
+        enableInternet: input.enableInternet ?? true,
+        datasetDataSources: input.datasetDataSources ?? [],
+        competitionDataSources: [],
+        kernelDataSources: [],
+        modelDataSources: [],
+        accelerator: input.accelerator ?? 'NvidiaTeslaT4',
+      }),
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API to start the notebook.', 'KAGGLE_PUSH_FAILED');
+  }
+
+  const payload = (await readJsonSafe(response)) as {
+    ref?: unknown;
+    url?: unknown;
+    versionNumber?: unknown;
+    error?: unknown;
+    message?: unknown;
+  } | null;
+
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError(
+      401,
+      'Kaggle rejected notebook creation. Check your API credentials and phone verification.',
+      'KAGGLE_AUTH_REJECTED',
+    );
+  }
+  if (response.status === 429) {
+    throw new HttpError(429, 'Kaggle quota or rate limit was reached. Try again later.', 'KAGGLE_RATE_LIMITED');
+  }
+  if (!response.ok || (payload && typeof payload.error === 'string' && payload.error)) {
+    throw new HttpError(502, 'Kaggle could not start the transcription notebook.', 'KAGGLE_PUSH_FAILED');
+  }
+
+  return {
+    ref: typeof payload?.ref === 'string' && payload.ref ? payload.ref : input.slug,
+    url: typeof payload?.url === 'string' ? payload.url : null,
+    versionNumber: typeof payload?.versionNumber === 'number' ? payload.versionNumber : null,
+  };
+}
+
+export async function getKernelStatus(
+  headers: Record<string, string>,
+  kernelRef: string,
+  options: KaggleClientOptions = {},
+): Promise<KernelStatusResult> {
+  const { owner, slug } = splitKernelRef(kernelRef);
+  const fetchFn = getFetch(options);
+  const url = `${getBaseUrl(options)}/kernels/status?userName=${encodeURIComponent(owner)}&kernelSlug=${encodeURIComponent(slug)}`;
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: 'GET',
+      headers: { ...headers, Accept: 'application/json' },
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API for kernel status.', 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError(401, 'Kaggle API credentials were rejected while checking kernel status.', 'KAGGLE_AUTH_REJECTED');
+  }
+  if (response.status === 404) {
+    return { status: 'error', rawStatus: 'NOT_FOUND', failureMessage: 'Kaggle kernel no longer exists.' };
+  }
+  if (!response.ok) {
+    throw new HttpError(502, `Kaggle status check failed with HTTP ${response.status}.`, 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  const payload = (await readJsonSafe(response)) as {
+    status?: unknown;
+    failureMessage?: unknown;
+  } | null;
+
+  const rawStatus = typeof payload?.status === 'string' ? payload.status : null;
+  return {
+    status: normalizeKaggleKernelStatus(rawStatus),
+    rawStatus,
+    failureMessage: typeof payload?.failureMessage === 'string' && payload.failureMessage.trim()
+      ? payload.failureMessage.trim()
+      : null,
+  };
+}
+
+export async function cancelKernel(
+  headers: Record<string, string>,
+  kernelRef: string,
+  options: KaggleClientOptions = {},
+): Promise<CancelKernelResult> {
+  const { owner, slug } = splitKernelRef(kernelRef);
+  const fetchFn = getFetch(options);
+  const baseUrl = getBaseUrl(options);
+
+  let response: Response;
+  try {
+    response = await fetchFn(`${baseUrl}/kernels/cancel`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userName: owner, kernelSlug: slug }),
+    });
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API to cancel the notebook.', 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (response.ok) {
+    return { cancelled: true, method: 'cancel' };
+  }
+
+  if (response.status === 404 || response.status === 405) {
+    let deleteResponse: Response;
+    try {
+      deleteResponse = await fetchFn(`${baseUrl}/kernels/delete`, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userName: owner, kernelSlug: slug }),
+      });
+    } catch {
+      throw new HttpError(502, 'Could not reach Kaggle API to remove the notebook.', 'KAGGLE_API_UNAVAILABLE');
+    }
+    if (deleteResponse.ok || deleteResponse.status === 404) {
+      return { cancelled: true, method: 'delete' };
+    }
+    if (deleteResponse.status === 401 || deleteResponse.status === 403) {
+      throw new HttpError(401, 'Kaggle API credentials were rejected while cancelling the notebook.', 'KAGGLE_AUTH_REJECTED');
+    }
+    throw new HttpError(502, `Kaggle notebook delete failed with HTTP ${deleteResponse.status}.`, 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError(401, 'Kaggle API credentials were rejected while cancelling the notebook.', 'KAGGLE_AUTH_REJECTED');
+  }
+
+  throw new HttpError(502, `Kaggle notebook cancel failed with HTTP ${response.status}.`, 'KAGGLE_API_UNAVAILABLE');
+}

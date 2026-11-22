@@ -13,8 +13,11 @@ function uploadingJob(): Job {
     originalFilename: 'lesson.mp4',
     sourceObjectKey: 'users/usr_123/jobs/job_456/source/lesson.mp4',
     outputObjectKey: null,
+    srtObjectKey: null,
     contentType: 'video/mp4',
     fileSizeBytes: 1234,
+    modelId: 'bofenghuang/whisper-large-v3-french-distil-dec16',
+    language: 'fr',
     status: 'UPLOADING',
     progress: 0,
     durationSec: null,
@@ -28,6 +31,14 @@ function uploadingJob(): Job {
     completedAt: null,
     expiresAt: null,
     workerRunId: null,
+    callbackTokenHash: null,
+    callbackTokenExpiresAt: null,
+    kaggleKernelRef: null,
+    kaggleShard1Ref: null,
+    dualMode: false,
+    shard0Done: false,
+    shard1Done: false,
+    storageCleanedAt: null,
   };
 }
 

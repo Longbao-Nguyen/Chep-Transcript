@@ -1,6 +1,8 @@
-import { Clock3, Loader2, Play, X } from 'lucide-react';
+import { Clock3, Loader2, Pause, Play, X } from 'lucide-react';
 
+import type { TranscriptionModelSummary } from '../../../shared/models';
 import type { ClientJob, LocalUpload, QueueState } from '../../types';
+import { formatJobModelLabel } from '../models/useModels';
 import { StatusBadge } from './StatusBadge';
 import { isActiveJob } from './useJobsPolling';
 import { queueStartControl } from './queueControls';
@@ -18,26 +20,32 @@ function progressText(job: ClientJob): string | null {
 export function CurrentJobs({
   jobs,
   uploads,
+  models = [],
   loading,
   queueState,
   queuedCount,
+  pauseAfterCurrent = false,
   cancellingJobId,
   starting,
   workerReady,
   onCancel,
   onStart,
+  onTogglePauseAfterCurrent,
   onDismissUpload,
 }: {
   jobs: ClientJob[];
   uploads: LocalUpload[];
+  models?: TranscriptionModelSummary[];
   loading: boolean;
   queueState: QueueState;
   queuedCount: number;
+  pauseAfterCurrent?: boolean;
   cancellingJobId: string | null;
   starting: boolean;
   workerReady: boolean;
   onCancel: (job: ClientJob) => void;
   onStart: () => void;
+  onTogglePauseAfterCurrent?: () => void;
   onDismissUpload: (localId: string) => void;
 }) {
   const localJobIds = new Set(uploads.flatMap((item) => item.jobId ? [item.jobId] : []));
@@ -52,8 +60,25 @@ export function CurrentJobs({
           <Clock3 className="h-5 w-5 text-emerald-700" />
           <h2 className="font-bold text-slate-900">Queue <span className="ml-2 text-xs font-normal text-slate-500">{activeJobs.length + uploads.length}</span></h2>
         </div>
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
-        <button type="button" disabled={loading || start.disabled} onClick={onStart} aria-describedby="queue-start-help" className="inline-flex items-center gap-2 rounded-lg bg-[#294f38] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c3e2a] disabled:cursor-not-allowed disabled:opacity-50"><Play size={14} />{start.label}</button>
+        <div className="flex items-center gap-2">
+          {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+          {queueState === 'RUNNING' && queuedCount > 0 && onTogglePauseAfterCurrent && (
+            <button
+              type="button"
+              aria-pressed={pauseAfterCurrent}
+              onClick={onTogglePauseAfterCurrent}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                pauseAfterCurrent
+                  ? 'border-amber-300 bg-amber-50 text-amber-900'
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Pause size={13} />
+              {pauseAfterCurrent ? 'Will pause after current' : 'Pause after current'}
+            </button>
+          )}
+          <button type="button" disabled={loading || start.disabled} onClick={onStart} aria-describedby="queue-start-help" className="inline-flex items-center gap-2 rounded-lg bg-[#294f38] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1c3e2a] disabled:cursor-not-allowed disabled:opacity-50"><Play size={14} />{start.label}</button>
+        </div>
       </div>
       <p id="queue-start-help" className="mb-5 text-xs leading-5 text-slate-500">{start.reason}</p>
 
@@ -98,8 +123,17 @@ export function CurrentJobs({
           {activeJobs.map((job) => (
             <div key={job.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-800">{job.filename}</p>
-                <p className="mt-1 text-xs text-slate-400">{formatBytes(job.fileSizeBytes)}</p>
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-semibold text-slate-800">{job.filename}</p>
+                  {job.dualMode && (
+                    <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                      Dual T4
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  {formatBytes(job.fileSizeBytes)} · {formatJobModelLabel(job, models)}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge status={job.status} />

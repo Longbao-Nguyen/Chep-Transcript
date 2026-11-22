@@ -1,4 +1,4 @@
-export function createTranscriptDownloadFilename(originalFilename: string): string {
+export function createDownloadFilename(originalFilename: string, extension: 'txt' | 'srt' = 'txt'): string {
   const withoutExtension = originalFilename.replace(/\.[^.]+$/, '') || 'transcript';
   const safeBase = withoutExtension
     .normalize('NFKD')
@@ -6,7 +6,11 @@ export function createTranscriptDownloadFilename(originalFilename: string): stri
     .replace(/[^a-zA-Z0-9._-]+/g, '_')
     .replace(/^\.+/, '')
     .slice(0, 100) || 'transcript';
-  return `${safeBase}.txt`;
+  return `${safeBase}.${extension}`;
+}
+
+export function createTranscriptDownloadFilename(originalFilename: string): string {
+  return createDownloadFilename(originalFilename, 'txt');
 }
 
 export function attachmentContentDisposition(filename: string): string {

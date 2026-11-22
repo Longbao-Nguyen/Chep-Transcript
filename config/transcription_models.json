@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "default_language": "fr",
+  "languages": {
+    "fr": {
+      "label": "French",
+      "model": "bofenghuang/whisper-large-v3-french-distil-dec16",
+      "display_name": "Whisper Large v3 French (Distil)",
+      "description": "Fast, accurate distilled French Whisper large-v3",
+      "ct2_model": "nunu-willump/whisper-large-v3-french-distil-dec16-ct2",
+      "kaggle_dataset": "french-transcript/french-whisper-ct2/1",
+      "revision": "b259ae49f9fdc9fac3ec293a0019f1d04646eb58",
+      "backend": "ctranslate2",
+      "license": "mit",
+      "gpu_required": true,
+      "accelerator": "NvidiaTeslaT4",
+      "chunk_seconds": 40,
+      "sweet_spot": {
+        "compute_type": "float16",
+        "concurrency": 2
+      },
+      "transcribe": {
+        "beam_size": 5,
+        "vad_filter": false,
+        "condition_on_previous_text": true
+      },
+      "files": {
+        "config.json": {
+          "size": 7080,
+          "sha256": "972504e5cac665df6f58565cdefc7bc9dd6f9ee33df0f5eec3dae32521cf6493"
+        },
+        "model.bin": {
+          "size": 2247627421,
+          "sha256": "3fb4a2ac35540f921ed51804edd19d6b8f02cfc45956472fb6635965a339da5c"
+        },
+        "preprocessor_config.json": {
+          "size": 340,
+          "sha256": "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"
+        },
+        "tokenizer.json": {
+          "size": 2481353,
+          "sha256": "2643978e28839bf07b107b647217dfd7568344cb87eab65e1fd3685c511f2571"
+        },
+        "vocabulary.json": {
+          "size": 1068114,
+          "sha256": "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"
+        }
+      }
+    },
+    "en": {
+      "label": "English",
+      "model": "distil-whisper/distil-large-v3.5-ct2",
+      "display_name": "Distil-Whisper Large v3.5 (English)",
+      "description": "High-speed distilled English Whisper model",
+      "ct2_model": "nunu-willump/distil-large-v3.5-ct2",
+      "kaggle_dataset": "french-transcript/english-whisper-ct2/1",
+      "revision": "ad174880168211c2d2d39f5721b8a4308b61ec92",
+      "backend": "ctranslate2",
+      "license": "mit",
+      "gpu_required": true,
+      "accelerator": "NvidiaTeslaT4",
+      "chunk_seconds": 30,
+      "sweet_spot": {
+        "compute_type": "int8_float16",
+        "concurrency": 2
+      },
+      "transcribe": {
+        "beam_size": 5,
+        "vad_filter": false,
+        "condition_on_previous_text": false
+      },
+      "files": {
+        "config.json": {
+          "size": 2690,
+          "sha256": "90c55f775cc4e0bb17293d0bf12f96557a486f20dea886fabd8e6075a3588b21"
+        },
+        "model.bin": {
+          "size": 1512927867,
+          "sha256": "c58b88b8585ffcd2135fddaaf421ce72cb223b32edea70d156aed1dea319a119"
+        },
+        "preprocessor_config.json": {
+          "size": 340,
+          "sha256": "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"
+        },
+        "tokenizer.json": {
+          "size": 2480645,
+          "sha256": "b3c8202bbf06d8ee4232c5984baa563784ac4737e2e7fdc42fa180200d3cfcdb"
+        },
+        "vocabulary.json": {
+          "size": 1068114,
+          "sha256": "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"
+        }
+      }
+    },
+    "es": {
+      "label": "Spanish",
+      "model": "adriszmar/whisper-large-v3-turbo-es",
+      "display_name": "Whisper Large v3 Turbo (Spanish)",
+      "description": "Fine-tuned Whisper large-v3 turbo for Spanish",
+      "ct2_model": "nunu-willump/whisper-large-v3-turbo-es-ct2",
+      "kaggle_dataset": "french-transcript/spanish-whisper-ct2/1",
+      "revision": "a941c12bf808bf9e98b3d115f53dd33bd2b4e18b",
+      "backend": "ctranslate2",
+      "license": "mit",
+      "gpu_required": true,
+      "accelerator": "NvidiaTeslaT4",
+      "chunk_seconds": 30,
+      "sweet_spot": {
+        "compute_type": "int8_float16",
+        "concurrency": 2
+      },
+      "transcribe": {
+        "beam_size": 5,
+        "vad_filter": false,
+        "condition_on_previous_text": true
+      },
+      "files": {
+        "config.json": {
+          "size": 1405,
+          "sha256": "c805eff43fc2a1d00d5cfa315e4b2230895f34994257c185959808a116e7c4f0"
+        },
+        "model.bin": {
+          "size": 1617884929,
+          "sha256": "9be7a91a9fb34663c47ce082481b52d96c2addcb6899c000f80b7a7cd3958e76"
+        },
+        "tokenizer.json": {
+          "size": 3930645,
+          "sha256": "5c1bf30c9e716e1477bedef846b01be0013daecb89e9e3ef7ab89b23c178df1b"
+        },
+        "preprocessor_config.json": {
+          "size": 340,
+          "sha256": "7ccc62c6f2765af1f3b46c00c9b5894426835a05021c8b9c01eecb6dfb542711"
+        },
+        "vocabulary.json": {
+          "size": 1068114,
+          "sha256": "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"
+        }
+      }
+    },
+    "vi": {
+      "label": "Vietnamese",
+      "model": "vinai/PhoWhisper-medium",
+      "display_name": "PhoWhisper Medium (Vietnamese)",
+      "description": "VinAI PhoWhisper medium optimized for Vietnamese",
+      "ct2_model": "nunu-willump/PhoWhisper-medium-ct2",
+      "kaggle_dataset": "french-transcript/vietnamese-whisper-ct2/1",
+      "revision": "84fd238d9263ad77752ebb2fafb3402049199ef0",
+      "backend": "ctranslate2",
+      "license": "bsd-3-clause",
+      "gpu_required": true,
+      "accelerator": "NvidiaTeslaT4",
+      "chunk_seconds": 30,
+      "sweet_spot": {
+        "compute_type": "float16",
+        "concurrency": 2
+      },
+      "transcribe": {
+        "beam_size": 5,
+        "vad_filter": false,
+        "condition_on_previous_text": true
+      },
+      "files": {
+        "config.json": {
+          "size": 2257,
+          "sha256": "3622a2ddc41ec0e0fd4e68c13c6830f03b90c38d89aaad184de02c8c642cf807"
+        },
+        "model.bin": {
+          "size": 1527906453,
+          "sha256": "0fa00f4407a8d7099762e60e36e44eca81279ec17cf4708df040ffd6bc337b7e"
+        },
+        "tokenizer.json": {
+          "size": 3654002,
+          "sha256": "ef1cbdefa54ee88b08dccac83fc994fa69e45988abf0f46fecfeb2e08ac9e306"
+        },
+        "preprocessor_config.json": {
+          "size": 339,
+          "sha256": "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d"
+        },
+        "vocabulary.json": {
+          "size": 1068103,
+          "sha256": "5ad28279db5e546349708b9a74736e2c018737ac5a600f1048f1f26c99b85b47"
+        }
+      }
+    }
+  }
+}

@@ -10,8 +10,9 @@ export async function deleteSourceMedia(
 }
 
 export async function deleteTranscriptArtifact(
-  job: Pick<Job, 'outputObjectKey'>,
+  job: Pick<Job, 'outputObjectKey'> & { srtObjectKey?: string | null },
   storage: ObjectStorage = getObjectStorage(),
 ): Promise<void> {
   if (job.outputObjectKey) await storage.deleteObject(job.outputObjectKey);
+  if (job.srtObjectKey) await storage.deleteObject(job.srtObjectKey);
 }

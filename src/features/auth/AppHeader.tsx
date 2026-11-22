@@ -1,61 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { AudioLines, Check, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 
+import type { TranscriptionModelSummary } from '../../../shared/models';
 import type { AppSession } from '../../types';
 import { resetSession, signInWithGoogle, signOut } from './authActions';
-
-export interface ModelOption {
-  id: string;
-  label: string;
-  model: string;
-  description: string;
-}
-
-export const TRANSCRIPTION_MODELS: ModelOption[] = [
-  {
-    id: 'fr',
-    label: 'French',
-    model: 'bofenghuang/whisper-large-v3-french-distil-dec16',
-    description: 'Whisper large-v3 French, distilled',
-  },
-  {
-    id: 'en',
-    label: 'English',
-    model: 'distil-whisper/distil-large-v3.5-ct2',
-    description: 'Distil-Whisper large-v3.5',
-  },
-  {
-    id: 'es',
-    label: 'Spanish',
-    model: 'adriszmar/whisper-large-v3-turbo-es',
-    description: 'Whisper large-v3 turbo Spanish',
-  },
-  {
-    id: 'de',
-    label: 'German',
-    model: 'primeline/whisper-large-v3-turbo-german',
-    description: 'Whisper large-v3 turbo German',
-  },
-  {
-    id: 'vi',
-    label: 'Vietnamese',
-    model: 'vinai/PhoWhisper-medium',
-    description: 'PhoWhisper medium Vietnamese',
-  },
-];
 
 export function AppHeader({
   user,
   page,
   onGuide,
-  selectedModel = 'fr',
-  onSelectModel,
+  models,
+  selectedLanguage = 'fr',
+  onSelectLanguage,
 }: {
   user: AppSession['user'];
   page: string;
   onGuide: () => void;
-  selectedModel?: string;
-  onSelectModel?: (modelId: string) => void;
+  models: TranscriptionModelSummary[];
+  selectedLanguage?: string;
+  onSelectLanguage?: (language: string) => void;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(
     () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('model_open') === '1',
@@ -64,7 +27,7 @@ export function AppHeader({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const activeModel =
-    TRANSCRIPTION_MODELS.find((m) => m.id === selectedModel) || TRANSCRIPTION_MODELS[0];
+    models.find((item) => item.language === selectedLanguage) || models[0];
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -81,7 +44,6 @@ export function AppHeader({
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-md sm:px-6">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-        {/* Workspace + session indicator line */}
         <div className="flex min-w-0 items-center gap-2 text-sm">
           <span className="font-normal text-slate-500">Workspace</span>
           {user.name && user.name !== 'Guest' && user.name !== 'Anonymous Guest' ? (
@@ -97,9 +59,7 @@ export function AppHeader({
           <strong className="font-semibold text-slate-900">{page}</strong>
         </div>
 
-        {/* Right actions: Model Dropdown + User Guide + Reset Session */}
         <div className="flex items-center gap-2.5">
-          {/* Transcription Model Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <button
               type="button"
@@ -107,36 +67,36 @@ export function AppHeader({
               aria-expanded={modelDropdownOpen}
               onClick={() => setModelDropdownOpen((prev) => !prev)}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:border-slate-300"
-              title={`Selected model: ${activeModel.label}`}
+              title={activeModel ? `Selected model: ${activeModel.label}` : 'Select model'}
             >
               <AudioLines size={14} className="text-emerald-700 shrink-0" />
               <span className="hidden sm:inline text-slate-400">Model:</span>
-              <span className="font-semibold text-slate-800">{activeModel.label}</span>
+              <span className="font-semibold text-slate-800">{activeModel?.label ?? 'French'}</span>
               <ChevronDown size={13} className={`text-slate-400 transition-transform ${modelDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
             {modelDropdownOpen && (
               <div
                 role="listbox"
-                className="absolute right-0 mt-1.5 w-64 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg ring-1 ring-black/5 z-50 animate-in fade-in zoom-in-95 duration-100"
+                aria-label="Transcription models"
+                className="absolute right-0 mt-1.5 w-72 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg ring-1 ring-black/5 z-50"
               >
                 <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
                   Select Transcription Model
                 </div>
                 <div className="mt-1 space-y-0.5">
-                  {TRANSCRIPTION_MODELS.map((item) => {
-                    const isSelected = item.id === activeModel.id;
+                  {models.map((item) => {
+                    const isSelected = item.language === activeModel?.language;
                     return (
                       <button
-                        key={item.id}
+                        key={item.language}
                         type="button"
                         role="option"
                         aria-selected={isSelected}
                         onClick={() => {
-                          if (item.id === 'fr') onSelectModel?.(item.id);
+                          onSelectLanguage?.(item.language);
                           setModelDropdownOpen(false);
                         }}
-                        disabled={item.id !== 'fr'}
                         className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
                           isSelected
                             ? 'bg-emerald-50 text-emerald-900 font-medium'
@@ -149,7 +109,7 @@ export function AppHeader({
                             {isSelected && <Check size={14} className="text-emerald-700 shrink-0" />}
                           </div>
                           <p className="mt-0.5 text-[11px] text-slate-500 leading-tight">
-                            {item.description}{item.id !== 'fr' ? ' · Planned' : ''}
+                            {item.displayName}
                           </p>
                         </div>
                       </button>
@@ -160,7 +120,6 @@ export function AppHeader({
             )}
           </div>
 
-          {/* User Guide */}
           <button
             type="button"
             onClick={onGuide}
@@ -170,7 +129,7 @@ export function AppHeader({
             User Guide
           </button>
 
-          {user.id.startsWith('usr_anon_') ? (
+          {user.id?.startsWith('usr_anon_') ? (
             <button type="button" onClick={() => void signInWithGoogle().catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'Could not sign in.'))} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50">
               Sign in with Google
             </button>
@@ -180,8 +139,7 @@ export function AppHeader({
             </button>
           )}
 
-          {/* Reset / New Session */}
-          {user.id.startsWith('usr_anon_') && <button
+          {user.id?.startsWith('usr_anon_') && <button
             type="button"
             onClick={() => void resetSession().catch((error: unknown) => setAuthError(error instanceof Error ? error.message : 'Could not reset session.'))}
             className="rounded-lg border border-slate-200 bg-white p-2 text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-800 cursor-pointer"

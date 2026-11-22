@@ -11,6 +11,8 @@ function deletionOnlyStorage(deleted: string[]): ObjectStorage {
     async handleDirectUploadRequest() { throw new Error('Not used in this test.'); },
     async headObject() { return null; },
     async getPrivateObject() { return null; },
+    async putPrivateObject() { throw new Error('Not used in this test.'); },
+    async createSignedDownloadUrl() { throw new Error('Not used in this test.'); },
     async deleteObject(pathname) { deleted.push(pathname); },
   };
 }

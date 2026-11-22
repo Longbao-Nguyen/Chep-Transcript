@@ -5,6 +5,7 @@ import {
   head,
   issueSignedToken,
   presignUrl,
+  put,
   type PresignedUrlPayload,
 } from '@vercel/blob';
 
@@ -131,6 +132,46 @@ export class VercelBlobStorage implements ObjectStorage {
       etag: object.blob.etag,
       stream: object.stream,
     };
+  }
+
+  async putPrivateObject(
+    pathname: string,
+    body: string | Buffer | Uint8Array,
+    contentType: string,
+  ): Promise<StoredObjectMetadata> {
+    const payload = typeof body === 'string' || Buffer.isBuffer(body) ? body : Buffer.from(body);
+    const size = typeof payload === 'string' ? Buffer.byteLength(payload, 'utf8') : payload.byteLength;
+    const result = await put(pathname, payload, {
+      access: 'private',
+      contentType,
+      storeId: getStoreId(),
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+    return {
+      pathname: result.pathname,
+      size,
+      contentType: result.contentType,
+      etag: result.etag,
+    };
+  }
+
+  async createSignedDownloadUrl(pathname: string, expiresInMs: number): Promise<string> {
+    const validUntil = Date.now() + Math.max(1_000, expiresInMs);
+    const storeId = getStoreId();
+    const signedToken = await issueSignedToken({
+      storeId,
+      pathname,
+      operations: ['get'],
+      validUntil,
+    });
+    const { presignedUrl } = await presignUrl(signedToken, {
+      access: 'private',
+      operation: 'get',
+      pathname,
+      validUntil,
+    });
+    return presignedUrl;
   }
 
   async deleteObject(pathname: string): Promise<void> {

@@ -3,11 +3,13 @@
   "framework": "vite",
   "buildCommand": "npm run db:migrate:deploy && npm run build",
   "outputDirectory": "dist",
-  "rewrites": [
+  "crons": [
     {
-      "source": "/api/kaggle/status",
-      "destination": "/api/jobs?view=kaggle-status"
-    },
+      "path": "/api/cron/cleanup",
+      "schedule": "0 3 * * *"
+    }
+  ],
+  "rewrites": [
     {
       "source": "/api/auth/:path*",
       "destination": "/api/auth/[...auth]"

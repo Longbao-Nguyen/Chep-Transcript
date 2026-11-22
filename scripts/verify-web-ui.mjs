@@ -36,23 +36,137 @@ try {
   let queueState = 'IDLE';
   let failDownload = false;
   let failStatus = false;
+  let kaggleConnected = false;
   let forbiddenCalls = 0;
-  const base = { progress: null, fileSizeBytes: 12000000, durationSec: null, processedAudioSec: null,
-    errorCode: null, errorMessage: null, createdAt: new Date().toISOString(), uploadCompletedAt: new Date().toISOString(),
-    completedAt: null, expiresAt: null };
+
+  const modelsCatalog = {
+    defaultLanguage: 'fr',
+    models: [
+      {
+        language: 'fr',
+        label: 'French',
+        modelId: 'bofenghuang/whisper-large-v3-french-distil-dec16',
+        displayName: 'Whisper Large v3 French (Distil)',
+        description: 'Fast, accurate distilled French Whisper large-v3',
+        gpuRequired: true,
+        accelerator: 'NvidiaTeslaT4',
+        license: 'mit',
+      },
+      {
+        language: 'en',
+        label: 'English',
+        modelId: 'distil-whisper/distil-large-v3.5-ct2',
+        displayName: 'Distil-Whisper Large v3.5 (English)',
+        description: 'High-speed distilled English Whisper model',
+        gpuRequired: true,
+        accelerator: 'NvidiaTeslaT4',
+        license: 'mit',
+      },
+      {
+        language: 'es',
+        label: 'Spanish',
+        modelId: 'adriszmar/whisper-large-v3-turbo-es',
+        displayName: 'Whisper Large v3 Turbo (Spanish)',
+        description: 'Fine-tuned Whisper large-v3 turbo for Spanish',
+        gpuRequired: true,
+        accelerator: 'NvidiaTeslaT4',
+        license: 'mit',
+      },
+      {
+        language: 'vi',
+        label: 'Vietnamese',
+        modelId: 'vinai/PhoWhisper-medium',
+        displayName: 'PhoWhisper Medium (Vietnamese)',
+        description: 'VinAI PhoWhisper medium optimized for Vietnamese',
+        gpuRequired: true,
+        accelerator: 'NvidiaTeslaT4',
+        license: 'bsd-3-clause',
+      },
+    ],
+  };
+
+  const base = {
+    progress: null,
+    fileSizeBytes: 12000000,
+    modelId: 'bofenghuang/whisper-large-v3-french-distil-dec16',
+    language: 'fr',
+    durationSec: null,
+    processedAudioSec: null,
+    hasSrt: true,
+    dualMode: false,
+    errorCode: null,
+    errorMessage: null,
+    createdAt: new Date().toISOString(),
+    uploadCompletedAt: new Date().toISOString(),
+    completedAt: null,
+    expiresAt: null,
+  };
   let jobs = [
     { ...base, id: 'waiting', filename: 'French lecture.mp3', status: 'QUEUED' },
-    { ...base, id: 'done', filename: 'Completed lecture.mp3', status: 'COMPLETED', progress: 1,
-      completedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() },
+    {
+      ...base,
+      id: 'done',
+      filename: 'Completed lecture.mp3',
+      status: 'COMPLETED',
+      progress: 1,
+      completedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    },
     { ...base, id: 'expired', filename: 'Older recording.mp3', status: 'EXPIRED' },
   ];
+
+  const kagglePayload = () => kaggleConnected
+    ? {
+        connected: true,
+        available: true,
+        authMode: 'api_token',
+        username: 'fixture-user',
+        oauthEnabled: false,
+        gpuStatus: 'unchecked',
+        gpuMessage: null,
+        gpuCheckedAt: null,
+        connectedAt: new Date().toISOString(),
+        message: 'Connected to Kaggle as fixture-user.',
+      }
+    : {
+        connected: false,
+        available: false,
+        authMode: null,
+        username: null,
+        oauthEnabled: false,
+        gpuStatus: 'unchecked',
+        gpuMessage: null,
+        gpuCheckedAt: null,
+        connectedAt: null,
+        message: 'Connect your Kaggle API token to run transcription on Kaggle T4 GPUs.',
+      };
+
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     const json = (data, status = 200) => route.fulfill({ status, json: data });
-    if (pathname === '/api/auth/session') return json({ user: { email: 'preview@example.test', name: 'Workspace preview', image: null }, expires: '2099-01-01' });
-    if (pathname === '/api/kaggle/status') return failStatus ? json({}, 503) : json({ available: false, message: 'Online GPU setup is not available yet. You can still upload files and manage your queue.' });
-    if (pathname === '/api/jobs') return json({ jobs, queueState, queuedCount: jobs.filter((job) => job.status === 'QUEUED').length });
+    if (pathname === '/api/auth/session') {
+      return json({
+        user: { id: 'usr_anon_fixture', email: 'preview@example.test', name: 'Workspace preview', image: null },
+        expires: '2099-01-01',
+      });
+    }
+    if (pathname === '/api/models') return json(modelsCatalog);
+    if (pathname === '/api/kaggle/status') return failStatus ? json({}, 503) : json(kagglePayload());
+    if (pathname === '/api/kaggle/connect') {
+      kaggleConnected = true;
+      return json(kagglePayload());
+    }
+    if (pathname === '/api/kaggle/disconnect') {
+      kaggleConnected = false;
+      return json(kagglePayload());
+    }
+    if (pathname === '/api/jobs') {
+      return json({ jobs, queueState, queuedCount: jobs.filter((job) => job.status === 'QUEUED').length, pauseAfterCurrent: false });
+    }
+    if (pathname.endsWith('/preview')) {
+      return json({ jobId: 'done', filename: 'Completed lecture.mp3', text: '[00:00:00 - 00:00:05] Fixture preview.', hasSrt: true });
+    }
     if (pathname.endsWith('/cancel')) {
       const job = jobs.find((item) => pathname.includes(`/${item.id}/`));
       if (job.status === 'QUEUED') job.status = 'CANCELLED';
@@ -67,12 +181,25 @@ try {
     forbiddenCalls++;
     return json({ error: { message: 'Unexpected API call in browser fixture.' } }, 500);
   });
+
   await page.goto(origin);
   await page.getByRole('heading', { name: 'Your recordings, ready to transcribe.' }).waitFor();
-  await page.getByRole('status').filter({ hasText: 'Online GPU setup' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Connect Kaggle GPU', exact: true }).isDisabled(), true);
-  assert.equal(await page.getByRole('button', { name: 'Check GPU condition', exact: true }).isDisabled(), true);
+  await page.getByText('Connect with Kaggle API Token').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Start', exact: true }).isDisabled(), true);
+
+  // Verify model selector allows choosing another language
+  await page.getByLabel('Language & model').selectOption('vi');
+  assert.equal(await page.getByLabel('Language & model').inputValue(), 'vi');
+  await page.getByLabel('Language & model').selectOption('fr');
+
+  // Verify Kaggle token connect & disconnect fixture flow
+  await page.getByLabel('Kaggle API Token *').fill('KGAT_fixture_token_123456');
+  await page.getByRole('button', { name: 'Connect Kaggle', exact: true }).click();
+  await page.getByText('Connected as fixture-user').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Start', exact: true }).isDisabled(), false);
+  await page.getByRole('button', { name: 'Disconnect Kaggle', exact: true }).click();
+  await page.getByText('Connect with Kaggle API Token').waitFor();
+
   await mkdir(output, { recursive: true });
   await page.screenshot({ path: path.join(output, 'transcribe-desktop.png'), fullPage: true });
 
@@ -85,6 +212,10 @@ try {
   await page.getByRole('button', { name: 'History', exact: false }).first().click();
   await page.getByRole('heading', { name: 'History', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Download TXT', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: 'Download SRT', exact: true }).count(), 1);
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await page.getByText('Fixture preview.').waitFor();
+  await page.keyboard.press('Escape');
   const downloadEvent = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download TXT', exact: true }).click();
   const download = await downloadEvent;
@@ -101,8 +232,10 @@ try {
   await page.getByRole('button', { name: 'Remove French lecture.mp3' }).click();
   await page.getByText('No files in the queue. Add a recording to get started.').waitFor();
 
-  jobs = [{ ...base, id: 'active', filename: 'Active lecture.mp3', status: 'TRANSCRIBING', progress: 0.4 },
-    { ...base, id: 'next', filename: 'Next recording.mp3', status: 'QUEUED' }];
+  jobs = [
+    { ...base, id: 'active', filename: 'Active lecture.mp3', status: 'TRANSCRIBING', progress: 0.4 },
+    { ...base, id: 'next', filename: 'Next recording.mp3', status: 'QUEUED' },
+  ];
   queueState = 'RUNNING';
   await page.reload();
   await page.getByRole('button', { name: 'Cancel processing Active lecture.mp3' }).click();
@@ -127,13 +260,13 @@ try {
   failStatus = true;
   await page.getByRole('button', { name: 'Kaggle connection Show setup' }).click();
   await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
-  await page.getByText('Could not check online GPU availability. Please try again.').waitFor();
+  await page.getByRole('alert').filter({ hasText: 'Could not check Kaggle connection status.' }).waitFor();
   failStatus = false;
   await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: 'Online GPU setup' }).waitFor();
+  await page.getByText('Connect your Kaggle API token to run transcription on Kaggle T4 GPUs.').waitFor();
   assert.equal(forbiddenCalls, 0, 'Disabled GPU controls must not launch work.');
   assert.deepEqual(errors, []);
-  console.log('UI_SMOKE_OK: navigation, unavailable GPU, guide focus/Escape, download/error, upload error, remove, cancel, pause, mobile, status retry; fixtures only.');
+  console.log('UI_SMOKE_OK: navigation, Kaggle token connect/disconnect, model selector, guide focus/Escape, download/error, upload error, remove, cancel, pause, mobile, status retry; fixtures only.');
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));

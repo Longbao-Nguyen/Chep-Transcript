@@ -15,6 +15,10 @@ export function getObjectStorage(): ObjectStorage {
   return storage;
 }
 
+export function setObjectStorageForTests(value: ObjectStorage | undefined): void {
+  storage = value;
+}
+
 export function resetObjectStorageForTests(): void {
   storage = undefined;
 }

@@ -11,8 +11,10 @@ import { MultiFileUploadPanel } from './features/upload/MultiFileUploadPanel';
 import { uploadFileDirectly } from './features/upload/uploadFile';
 import { KaggleConnection } from './features/kaggle/KaggleConnection';
 import { useKaggleStatus } from './features/kaggle/useKaggleStatus';
+import { useModels } from './features/models/useModels';
 import { UserGuide } from './features/guide/UserGuide';
 import { CancelJobDialog } from './features/jobs/CancelJobDialog';
+import { TranscriptDialog } from './features/jobs/TranscriptDialog';
 import type { ClientJob, LocalUpload } from './types';
 
 function createLocalUpload(file: File): LocalUpload {
@@ -28,18 +30,22 @@ function createLocalUpload(file: File): LocalUpload {
 
 export default function App() {
   const { session, loading: sessionLoading, error: sessionError } = useSession();
-  const { jobs, queueState, queuedCount, loading: jobsLoading, error: jobsError, refresh } = useJobsPolling(Boolean(session));
+  const { jobs, queueState, queuedCount, pauseAfterCurrent, loading: jobsLoading, error: jobsError, refresh } = useJobsPolling(Boolean(session));
   const [uploads, setUploads] = useState<LocalUpload[]>([]);
   const [confirmJob, setConfirmJob] = useState<ClientJob | null>(null);
+  const [previewJob, setPreviewJob] = useState<ClientJob | null>(null);
   const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
+  const [historyBusyJobId, setHistoryBusyJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [tab, setTab] = useState<'transcribe' | 'history'>('transcribe');
-  const [selectedModel, setSelectedModel] = useState<string>('fr');
+  const { models, defaultLanguage } = useModels();
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(defaultLanguage);
   const [guideOpen, setGuideOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const startLock = useRef(false);
   const kaggle = useKaggleStatus(Boolean(session));
+  const selectedModel = models.find((item) => item.language === selectedLanguage) ?? models[0];
 
   const cancelJob = useCallback(async (job: ClientJob) => {
     setConfirmJob(null);
@@ -75,13 +81,90 @@ export default function App() {
     }
   }, [refresh]);
 
+  const togglePauseAfterCurrent = useCallback(async () => {
+    setActionError(null);
+    try {
+      const response = await fetch('/api/queue/start', {
+        method: 'PATCH',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pauseAfterCurrent: !pauseAfterCurrent }),
+      });
+      const payload = await response.json() as { error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message || 'Could not update queue pause preference.');
+      await refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not update queue pause preference.');
+    }
+  }, [pauseAfterCurrent, refresh]);
+
+  const retryJob = useCallback(async (job: ClientJob) => {
+    setHistoryBusyJobId(job.id);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}/retry`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const payload = await response.json() as { error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message || 'Could not retry job.');
+      await refresh();
+      setTab('transcribe');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not retry job.');
+    } finally {
+      setHistoryBusyJobId(null);
+    }
+  }, [refresh]);
+
+  const deleteHistoryJob = useCallback(async (job: ClientJob) => {
+    setHistoryBusyJobId(job.id);
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      const payload = await response.json() as { error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message || 'Could not delete job.');
+      await refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not delete job.');
+    } finally {
+      setHistoryBusyJobId(null);
+    }
+  }, [refresh]);
+
+  const downloadFromPreview = useCallback(async (job: ClientJob, format: 'txt' | 'srt') => {
+    setActionError(null);
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}/download?format=${format}`, {
+        credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error('Could not download transcript.');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${job.filename.replace(/\.[^.]+$/, '') || 'transcript'}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not download transcript.');
+    }
+  }, []);
+
   const updateUpload = useCallback((localId: string, patch: Partial<LocalUpload>) => {
     setUploads((current) => current.map((item) => item.localId === localId ? { ...item, ...patch } : item));
   }, []);
 
-  const processUpload = useCallback(async (item: LocalUpload) => {
+  const processUpload = useCallback(async (item: LocalUpload, language: string, modelId?: string) => {
     try {
       await uploadFileDirectly(item.file, {
+        language,
+        modelId,
         onInitialized(jobId) {
           updateUpload(item.localId, { jobId, state: 'UPLOADING' });
         },
@@ -106,9 +189,11 @@ export default function App() {
 
   const handleFiles = useCallback((files: File[]) => {
     const pending = files.map(createLocalUpload);
+    const language = selectedLanguage;
+    const modelId = selectedModel?.modelId;
     setUploads((current) => [...current, ...pending]);
-    pending.forEach((item) => void processUpload(item));
-  }, [processUpload]);
+    pending.forEach((item) => void processUpload(item, language, modelId));
+  }, [processUpload, selectedLanguage, selectedModel]);
 
   const dismissUpload = useCallback((localId: string) => {
     setUploads((current) => current.filter((item) => item.localId !== localId));
@@ -180,8 +265,12 @@ export default function App() {
           <KaggleConnection
             status={kaggle.status}
             loading={kaggle.loading}
+            submitting={kaggle.submitting}
             error={kaggle.error}
             onRefresh={() => void kaggle.refresh()}
+            onConnect={kaggle.connect}
+            onCheckGpu={kaggle.checkGpu}
+            onDisconnect={kaggle.disconnect}
           />
         </div>
 
@@ -195,8 +284,9 @@ export default function App() {
           user={session.user}
           page={tab === 'transcribe' ? 'Transcribe' : 'History'}
           onGuide={() => setGuideOpen(true)}
-          selectedModel={selectedModel}
-          onSelectModel={setSelectedModel}
+          models={models}
+          selectedLanguage={selectedLanguage}
+          onSelectLanguage={setSelectedLanguage}
         />
 
         <main className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-8">
@@ -208,18 +298,26 @@ export default function App() {
 
           {tab === 'transcribe' ? (
             <div className="space-y-6">
-              <MultiFileUploadPanel onFiles={handleFiles} />
+              <MultiFileUploadPanel
+                onFiles={handleFiles}
+                models={models}
+                selectedLanguage={selectedLanguage}
+                onSelectLanguage={setSelectedLanguage}
+              />
               <CurrentJobs
                 jobs={jobs}
                 uploads={uploads}
+                models={models}
                 loading={jobsLoading}
                 queueState={queueState}
                 queuedCount={queuedCount}
+                pauseAfterCurrent={pauseAfterCurrent}
                 cancellingJobId={cancellingJobId}
                 starting={starting}
-                workerReady={Boolean(kaggle.status?.available)}
+                workerReady={Boolean(kaggle.status?.connected)}
                 onCancel={(job) => job.status === 'QUEUED' ? void cancelJob(job) : setConfirmJob(job)}
                 onStart={() => void startQueue()}
+                onTogglePauseAfterCurrent={() => void togglePauseAfterCurrent()}
                 onDismissUpload={dismissUpload}
               />
               {jobs.some((job) => job.status === 'COMPLETED') && (
@@ -234,7 +332,14 @@ export default function App() {
               )}
             </div>
           ) : (
-            <CompletedJobs jobs={jobs} />
+            <CompletedJobs
+              jobs={jobs}
+              models={models}
+              onPreview={(job) => setPreviewJob(job)}
+              onRetry={(job) => void retryJob(job)}
+              onDelete={(job) => void deleteHistoryJob(job)}
+              busyJobId={historyBusyJobId}
+            />
           )}
         </main>
       </div>
@@ -244,6 +349,13 @@ export default function App() {
           job={confirmJob}
           onClose={() => setConfirmJob(null)}
           onConfirm={() => void cancelJob(confirmJob)}
+        />
+      )}
+      {previewJob && (
+        <TranscriptDialog
+          job={previewJob}
+          onClose={() => setPreviewJob(null)}
+          onDownload={(job, format) => void downloadFromPreview(job, format)}
         />
       )}
       {guideOpen && <UserGuide onClose={() => setGuideOpen(false)} />}
