@@ -56,6 +56,8 @@ function toSafeStatus(record: KaggleCredentialsRecord | null, overrideMessage?: 
   };
 }
 
+const GPU_PROBE_TIMEOUT_MS = 10 * 60_000;
+
 export const GET = route(async (request) => {
   const action = extractPathId(new URL(request.url).pathname, '/api/kaggle/');
   if (action !== 'status') {
@@ -66,6 +68,9 @@ export const GET = route(async (request) => {
   let record = await repositories.kaggleCredentials.getKaggleCredentials(user.id);
 
   if (record && record.gpuStatus === 'checking' && record.gpuProbeRef) {
+    const timedOut = Boolean(
+      record.gpuCheckedAt && Date.now() - record.gpuCheckedAt.getTime() > GPU_PROBE_TIMEOUT_MS,
+    );
     try {
       const auth = await getKaggleAuthContextForUser(user.id, repositories);
       const remote = await getKernelStatus(auth.headers, record.gpuProbeRef);
@@ -89,9 +94,27 @@ export const GET = route(async (request) => {
         });
         await cancelKernel(auth.headers, record.gpuProbeRef).catch(() => undefined);
         if (updated) record = updated;
+      } else if (timedOut) {
+        const updated = await repositories.kaggleCredentials.updateGpuCheck(user.id, {
+          gpuStatus: 'error',
+          gpuMessage: 'Kaggle GPU check timed out. Click Check GPU condition to try again.',
+          gpuCheckedAt: new Date(),
+          gpuProbeRef: null,
+        });
+        await cancelKernel(auth.headers, record.gpuProbeRef).catch(() => undefined);
+        if (updated) record = updated;
       }
-    } catch {
-      // Leave status as checking if transient poll fails; next status check will retry.
+    } catch (error) {
+      console.warn('kaggle_gpu_probe_poll_failed', error instanceof Error ? error.message : String(error));
+      if (timedOut) {
+        const updated = await repositories.kaggleCredentials.updateGpuCheck(user.id, {
+          gpuStatus: 'error',
+          gpuMessage: 'Kaggle GPU check timed out. Click Check GPU condition to try again.',
+          gpuCheckedAt: new Date(),
+          gpuProbeRef: null,
+        });
+        if (updated) record = updated;
+      }
     }
   }
 

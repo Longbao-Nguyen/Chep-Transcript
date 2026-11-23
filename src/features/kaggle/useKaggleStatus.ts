@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface KaggleStatus {
   connected: boolean;
@@ -31,10 +31,11 @@ export function useKaggleStatus(enabled: boolean) {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pollInFlightRef = useRef(false);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
+  const refresh = useCallback(async (signal?: AbortSignal, options?: { silent?: boolean }) => {
     if (!enabled) return;
-    setLoading(true);
+    if (!options?.silent) setLoading(true);
     try {
       const response = await fetch('/api/kaggle/status', { credentials: 'same-origin', signal });
       if (!response.ok) throw new Error(await readApiError(response, 'Could not check Kaggle connection status.'));
@@ -47,12 +48,12 @@ export function useKaggleStatus(enabled: boolean) {
         setError(null);
       }
     } catch (cause) {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && !options?.silent) {
         setStatus(null);
         setError(cause instanceof Error ? cause.message : 'Could not check Kaggle connection status.');
       }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && !options?.silent) setLoading(false);
     }
   }, [enabled]);
 
@@ -135,8 +136,19 @@ export function useKaggleStatus(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled || status?.gpuStatus !== 'checking') return;
-    const timer = window.setTimeout(() => void refresh(), 5_000);
-    return () => window.clearTimeout(timer);
+    const poll = async () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      try {
+        await refresh(undefined, { silent: true });
+      } finally {
+        pollInFlightRef.current = false;
+      }
+    };
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, 5_000);
+    return () => window.clearInterval(intervalId);
   }, [enabled, refresh, status?.gpuStatus]);
 
   return { status, loading, submitting, error, refresh, connect, checkGpu, disconnect };

@@ -49,7 +49,8 @@ export interface CancelKernelResult {
 }
 
 function splitKernelRef(kernelRef: string): { owner: string; slug: string } {
-  const parts = kernelRef.split('/');
+  const normalized = kernelRef.trim().replace(/^\/+|\/+$/g, '');
+  const parts = normalized.split('/');
   if (parts.length !== 2 || !/^[a-zA-Z0-9_-]+$/.test(parts[0]) || !/^[a-zA-Z0-9_-]+$/.test(parts[1])) {
     throw new HttpError(400, 'Invalid Kaggle kernel reference.', 'INVALID_KERNEL_REF');
   }
@@ -110,13 +111,30 @@ function extractUsernameFromPayload(payload: unknown): string | null {
 }
 
 export function normalizeKaggleKernelStatus(raw: unknown): NormalizedKernelStatus {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw === 1) return 'queued';
+    if (raw === 2) return 'running';
+    if (raw === 3) return 'complete';
+    if (raw === 4) return 'error';
+    if (raw === 6) return 'cancelAcknowledged';
+    return 'unknown';
+  }
   if (typeof raw !== 'string' || !raw.trim()) return 'unknown';
-  const cleaned = raw.trim().replace(/^KernelWorkerStatus\./i, '').toLowerCase();
+  const cleaned = raw
+    .trim()
+    .replace(/^KernelWorkerStatus\./i, '')
+    .replace(/^KERNEL_WORKER_STATUS_/i, '')
+    .toLowerCase();
   if (cleaned === 'queued' || cleaned === 'pending') return 'queued';
   if (cleaned === 'running') return 'running';
   if (cleaned === 'complete' || cleaned === 'completed') return 'complete';
   if (cleaned === 'error' || cleaned === 'failed') return 'error';
-  if (cleaned === 'cancelacknowledged' || cleaned === 'cancel_acknowledged' || cleaned === 'cancelled') {
+  if (
+    cleaned === 'cancelacknowledged'
+    || cleaned === 'cancel_acknowledged'
+    || cleaned === 'cancelled'
+    || cleaned === 'canceled'
+  ) {
     return 'cancelAcknowledged';
   }
   return 'unknown';
@@ -288,8 +306,11 @@ export async function pushKernel(
     );
   }
 
+  const normalizedRef = typeof payload?.ref === 'string'
+    ? payload.ref.trim().replace(/^\/+|\/+$/g, '')
+    : '';
   return {
-    ref: typeof payload?.ref === 'string' && payload.ref ? payload.ref : input.slug,
+    ref: normalizedRef.includes('/') ? normalizedRef : input.slug,
     url: typeof payload?.url === 'string' ? payload.url : null,
     versionNumber: typeof payload?.versionNumber === 'number' ? payload.versionNumber : null,
   };
@@ -326,12 +347,17 @@ export async function getKernelStatus(
 
   const payload = (await readJsonSafe(response)) as {
     status?: unknown;
+    Status?: unknown;
     failureMessage?: unknown;
   } | null;
 
-  const rawStatus = typeof payload?.status === 'string' ? payload.status : null;
+  const statusValue = payload?.status ?? payload?.Status ?? null;
+  const rawStatus =
+    typeof statusValue === 'string' || typeof statusValue === 'number'
+      ? String(statusValue)
+      : null;
   return {
-    status: normalizeKaggleKernelStatus(rawStatus),
+    status: normalizeKaggleKernelStatus(statusValue),
     rawStatus,
     failureMessage: typeof payload?.failureMessage === 'string' && payload.failureMessage.trim()
       ? payload.failureMessage.trim()

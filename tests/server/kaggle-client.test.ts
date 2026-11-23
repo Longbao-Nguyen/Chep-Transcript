@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { HttpError } from '../../server/http/responses';
-import { cancelKernel, getKernelStatus, pushKernel, verifyCredentials } from '../../server/kaggle/client';
+import {
+  cancelKernel,
+  getKernelStatus,
+  normalizeKaggleKernelStatus,
+  pushKernel,
+  verifyCredentials,
+} from '../../server/kaggle/client';
 
 test('verifyCredentials verifies via /hello, resolves username via group=profile when needed, and never leaks tokens', async () => {
   const seenUrls: string[] = [];
@@ -98,4 +104,65 @@ test('pushKernel, getKernelStatus, and cancelKernel interact with Kaggle API pay
     },
   });
   assert.deepEqual(cancelled, { cancelled: true, method: 'delete' });
+});
+
+test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelStatus handle Kaggle variants', async () => {
+  assert.equal(normalizeKaggleKernelStatus('COMPLETE'), 'complete');
+  assert.equal(normalizeKaggleKernelStatus('KernelWorkerStatus.COMPLETE'), 'complete');
+  assert.equal(normalizeKaggleKernelStatus('KERNEL_WORKER_STATUS_COMPLETE'), 'complete');
+  assert.equal(normalizeKaggleKernelStatus('KERNEL_WORKER_STATUS_CANCEL_ACKNOWLEDGED'), 'cancelAcknowledged');
+  assert.equal(normalizeKaggleKernelStatus(1), 'queued');
+  assert.equal(normalizeKaggleKernelStatus(2), 'running');
+  assert.equal(normalizeKaggleKernelStatus(3), 'complete');
+  assert.equal(normalizeKaggleKernelStatus(4), 'error');
+  assert.equal(normalizeKaggleKernelStatus(6), 'cancelAcknowledged');
+
+  const slashPush = await pushKernel(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    {
+      slug: 'alice/chep-job-slash',
+      notebook: { nbformat: 4, nbformat_minor: 5, cells: [] },
+    },
+    {
+      fetchFn: async () => Response.json({ ref: '/alice/chep-job-slash/' }),
+    },
+  );
+  assert.equal(slashPush.ref, 'alice/chep-job-slash');
+
+  const slugOnlyPush = await pushKernel(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    {
+      slug: 'alice/chep-job-slugonly',
+      notebook: { nbformat: 4, nbformat_minor: 5, cells: [] },
+    },
+    {
+      fetchFn: async () => Response.json({ ref: 'chep-job-slugonly' }),
+    },
+  );
+  assert.equal(slugOnlyPush.ref, 'alice/chep-job-slugonly');
+
+  const numericStatus = await getKernelStatus(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    '/alice/chep-job-slash/',
+    {
+      fetchFn: async (url) => {
+        assert.equal(
+          String(url),
+          'https://www.kaggle.com/api/v1/kernels/status?userName=alice&kernelSlug=chep-job-slash',
+        );
+        return Response.json({ status: 3 });
+      },
+    },
+  );
+  assert.equal(numericStatus.status, 'complete');
+  assert.equal(numericStatus.rawStatus, '3');
+
+  const prefixedStatus = await getKernelStatus(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    'alice/chep-job-slash',
+    {
+      fetchFn: async () => Response.json({ status: 'KERNEL_WORKER_STATUS_COMPLETE' }),
+    },
+  );
+  assert.equal(prefixedStatus.status, 'complete');
 });
