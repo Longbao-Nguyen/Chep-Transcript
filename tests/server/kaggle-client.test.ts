@@ -165,4 +165,29 @@ test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelSt
     },
   );
   assert.equal(prefixedStatus.status, 'complete');
+
+  const nullableComplete = await getKernelStatus(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    'alice/chep-job-slash',
+    {
+      fetchFn: async () => Response.json({ statusNullable: 'COMPLETE', failureMessageNullable: null }),
+    },
+  );
+  assert.deepEqual(nullableComplete, { status: 'complete', rawStatus: 'COMPLETE', failureMessage: null });
+
+  const nullableError = await getKernelStatus(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    'alice/chep-job-slash',
+    {
+      fetchFn: async () => Response.json({
+        statusNullable: 'ERROR',
+        failureMessageNullable: 'GPU quota exceeded',
+      }),
+    },
+  );
+  assert.deepEqual(nullableError, {
+    status: 'error',
+    rawStatus: 'ERROR',
+    failureMessage: 'GPU quota exceeded',
+  });
 });

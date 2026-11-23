@@ -347,20 +347,43 @@ export async function getKernelStatus(
 
   const payload = (await readJsonSafe(response)) as {
     status?: unknown;
+    statusNullable?: unknown;
     Status?: unknown;
+    StatusNullable?: unknown;
     failureMessage?: unknown;
+    failureMessageNullable?: unknown;
+    FailureMessage?: unknown;
+    FailureMessageNullable?: unknown;
   } | null;
 
-  const statusValue = payload?.status ?? payload?.Status ?? null;
+  const statusValue =
+    payload?.status
+    ?? payload?.statusNullable
+    ?? payload?.Status
+    ?? payload?.StatusNullable
+    ?? null;
+  const failureValue =
+    payload?.failureMessage
+    ?? payload?.failureMessageNullable
+    ?? payload?.FailureMessage
+    ?? payload?.FailureMessageNullable
+    ?? null;
   const rawStatus =
     typeof statusValue === 'string' || typeof statusValue === 'number'
       ? String(statusValue)
       : null;
+  const normalized = normalizeKaggleKernelStatus(statusValue);
+  if (normalized === 'unknown') {
+    console.warn('kaggle_kernel_status_unknown', {
+      keys: payload && typeof payload === 'object' ? Object.keys(payload) : [],
+      rawStatus,
+    });
+  }
   return {
-    status: normalizeKaggleKernelStatus(statusValue),
+    status: normalized,
     rawStatus,
-    failureMessage: typeof payload?.failureMessage === 'string' && payload.failureMessage.trim()
-      ? payload.failureMessage.trim()
+    failureMessage: typeof failureValue === 'string' && failureValue.trim()
+      ? failureValue.trim()
       : null,
   };
 }
