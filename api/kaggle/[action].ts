@@ -10,7 +10,7 @@ import {
   isKaggleOAuthEnabled,
   parseKaggleConnectInput,
 } from '../../server/kaggle/auth.js';
-import { cancelKernel, getKernelStatus, pushKernel, verifyCredentials } from '../../server/kaggle/client.js';
+import { deleteKernel, getKernelStatus, pushKernel, verifyCredentials } from '../../server/kaggle/client.js';
 import { encryptKaggleSecret } from '../../server/kaggle/crypto.js';
 import { buildGpuProbeNotebook } from '../../server/kaggle/notebook-builder.js';
 
@@ -73,7 +73,8 @@ export const GET = route(async (request) => {
     );
     try {
       const auth = await getKaggleAuthContextForUser(user.id, repositories);
-      const remote = await getKernelStatus(auth.headers, record.gpuProbeRef);
+      const probeRef = record.gpuProbeRef;
+      const remote = await getKernelStatus(auth.headers, probeRef, { fallbackOwner: auth.username });
       if (remote.status === 'complete') {
         const updated = await repositories.kaggleCredentials.updateGpuCheck(user.id, {
           gpuStatus: 'ready',
@@ -81,7 +82,9 @@ export const GET = route(async (request) => {
           gpuCheckedAt: new Date(),
           gpuProbeRef: null,
         });
-        await cancelKernel(auth.headers, record.gpuProbeRef).catch(() => undefined);
+        await deleteKernel(auth.headers, probeRef, { fallbackOwner: auth.username }).catch((error) => {
+          console.warn('kaggle_gpu_probe_delete_failed', error instanceof Error ? error.message : String(error));
+        });
         if (updated) record = updated;
       } else if (remote.status === 'error' || remote.status === 'cancelAcknowledged') {
         const updated = await repositories.kaggleCredentials.updateGpuCheck(user.id, {
@@ -92,7 +95,9 @@ export const GET = route(async (request) => {
           gpuCheckedAt: new Date(),
           gpuProbeRef: null,
         });
-        await cancelKernel(auth.headers, record.gpuProbeRef).catch(() => undefined);
+        await deleteKernel(auth.headers, probeRef, { fallbackOwner: auth.username }).catch((error) => {
+          console.warn('kaggle_gpu_probe_delete_failed', error instanceof Error ? error.message : String(error));
+        });
         if (updated) record = updated;
       } else if (timedOut) {
         const updated = await repositories.kaggleCredentials.updateGpuCheck(user.id, {
@@ -101,7 +106,9 @@ export const GET = route(async (request) => {
           gpuCheckedAt: new Date(),
           gpuProbeRef: null,
         });
-        await cancelKernel(auth.headers, record.gpuProbeRef).catch(() => undefined);
+        await deleteKernel(auth.headers, probeRef, { fallbackOwner: auth.username }).catch((error) => {
+          console.warn('kaggle_gpu_probe_delete_failed', error instanceof Error ? error.message : String(error));
+        });
         if (updated) record = updated;
       }
     } catch (error) {
@@ -168,7 +175,7 @@ export const POST = route(async (request) => {
 
     const existing = await repositories.kaggleCredentials.getKaggleCredentials(user.id);
     if (existing?.gpuProbeRef) {
-      await cancelKernel(auth.headers, existing.gpuProbeRef).catch(() => undefined);
+      await deleteKernel(auth.headers, existing.gpuProbeRef, { fallbackOwner: auth.username }).catch(() => undefined);
     }
 
     const probeSlug = `chep-gpu-check-${randomBytes(8).toString('hex')}`;

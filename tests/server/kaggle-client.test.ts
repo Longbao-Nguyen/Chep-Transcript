@@ -4,6 +4,7 @@ import test from 'node:test';
 import { HttpError } from '../../server/http/responses';
 import {
   cancelKernel,
+  deleteKernel,
   getKernelStatus,
   normalizeKaggleKernelStatus,
   pushKernel,
@@ -96,14 +97,48 @@ test('pushKernel, getKernelStatus, and cancelKernel interact with Kaggle API pay
   assert.equal(statusResult.status, 'running');
 
   const cancelled = await cancelKernel({ Authorization: 'Bearer KGAT_1234567890abcdef' }, 'alice/chep-job-1', {
-    fetchFn: async (url) => {
+    fetchFn: async (url, init) => {
       if (String(url).endsWith('/kernels/cancel')) {
         return new Response('Method Not Allowed', { status: 405 });
       }
+      assert.equal(String(url), 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-job-1');
+      assert.equal(init?.method, 'DELETE');
       return Response.json({ ok: true });
     },
   });
   assert.deepEqual(cancelled, { cancelled: true, method: 'delete' });
+});
+
+test('deleteKernel calls DELETE /kernels/delete/{owner}/{slug} and handles 200 and 404', async () => {
+  const seenCalls: Array<{ url: string; method?: string }> = [];
+  const deletedOk = await deleteKernel(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    '/code/alice/chep-gpu-check-1',
+    {
+      fetchFn: async (url, init) => {
+        seenCalls.push({ url: String(url), method: init?.method });
+        return Response.json({ deleted: true });
+      },
+    },
+  );
+  assert.deepEqual(deletedOk, { deleted: true });
+  assert.deepEqual(seenCalls, [
+    { url: 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-gpu-check-1', method: 'DELETE' },
+  ]);
+
+  const deletedMissing = await deleteKernel(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    'chep-gpu-check-missing',
+    {
+      fallbackOwner: 'alice',
+      fetchFn: async (url, init) => {
+        assert.equal(String(url), 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-gpu-check-missing');
+        assert.equal(init?.method, 'DELETE');
+        return new Response('Not Found', { status: 404 });
+      },
+    },
+  );
+  assert.deepEqual(deletedMissing, { deleted: true });
 });
 
 test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelStatus handle Kaggle variants', async () => {
@@ -124,10 +159,22 @@ test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelSt
       notebook: { nbformat: 4, nbformat_minor: 5, cells: [] },
     },
     {
-      fetchFn: async () => Response.json({ ref: '/alice/chep-job-slash/' }),
+      fetchFn: async () => Response.json({ ref: '/code/alice/chep-job-slash/' }),
     },
   );
   assert.equal(slashPush.ref, 'alice/chep-job-slash');
+
+  const urlPush = await pushKernel(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    {
+      slug: 'alice/chep-job-url',
+      notebook: { nbformat: 4, nbformat_minor: 5, cells: [] },
+    },
+    {
+      fetchFn: async () => Response.json({ ref: 'https://www.kaggle.com/code/alice/chep-job-url' }),
+    },
+  );
+  assert.equal(urlPush.ref, 'alice/chep-job-url');
 
   const slugOnlyPush = await pushKernel(
     { Authorization: 'Bearer KGAT_1234567890abcdef' },
@@ -143,7 +190,7 @@ test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelSt
 
   const numericStatus = await getKernelStatus(
     { Authorization: 'Bearer KGAT_1234567890abcdef' },
-    '/alice/chep-job-slash/',
+    '/code/alice/chep-job-slash/',
     {
       fetchFn: async (url) => {
         assert.equal(
@@ -156,6 +203,22 @@ test('normalizeKaggleKernelStatus, pushKernel ref normalization, and getKernelSt
   );
   assert.equal(numericStatus.status, 'complete');
   assert.equal(numericStatus.rawStatus, '3');
+
+  const fallbackOwnerStatus = await getKernelStatus(
+    { Authorization: 'Bearer KGAT_1234567890abcdef' },
+    'chep-job-slugonly',
+    {
+      fallbackOwner: 'alice',
+      fetchFn: async (url) => {
+        assert.equal(
+          String(url),
+          'https://www.kaggle.com/api/v1/kernels/status?userName=alice&kernelSlug=chep-job-slugonly',
+        );
+        return Response.json({ statusNullable: 'COMPLETE' });
+      },
+    },
+  );
+  assert.equal(fallbackOwnerStatus.status, 'complete');
 
   const prefixedStatus = await getKernelStatus(
     { Authorization: 'Bearer KGAT_1234567890abcdef' },

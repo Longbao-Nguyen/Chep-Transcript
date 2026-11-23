@@ -5,6 +5,7 @@ const DEFAULT_KAGGLE_API_BASE_URL = 'https://www.kaggle.com/api/v1';
 export interface KaggleClientOptions {
   fetchFn?: typeof fetch;
   baseUrl?: string;
+  fallbackOwner?: string | null;
 }
 
 export interface VerifyCredentialsResult {
@@ -48,13 +49,32 @@ export interface CancelKernelResult {
   method: 'cancel' | 'delete';
 }
 
-function splitKernelRef(kernelRef: string): { owner: string; slug: string } {
-  const normalized = kernelRef.trim().replace(/^\/+|\/+$/g, '');
-  const parts = normalized.split('/');
-  if (parts.length !== 2 || !/^[a-zA-Z0-9_-]+$/.test(parts[0]) || !/^[a-zA-Z0-9_-]+$/.test(parts[1])) {
+export interface DeleteKernelResult {
+  deleted: boolean;
+}
+
+function splitKernelRef(kernelRef: string, fallbackOwner?: string | null): { owner: string; slug: string } {
+  let normalized = kernelRef.trim();
+  normalized = normalized.replace(/^https?:\/\/(?:www\.)?kaggle\.com\//i, '');
+  normalized = normalized.replace(/^\/+|\/+$/g, '');
+  normalized = normalized.replace(/^(?:code|kernels)\//i, '');
+
+  const parts = normalized.split('/').filter(Boolean);
+  let owner: string;
+  let slug: string;
+  if (parts.length === 1 && fallbackOwner && /^[a-zA-Z0-9_-]+$/.test(fallbackOwner.trim())) {
+    owner = fallbackOwner.trim();
+    slug = parts[0];
+  } else if (parts.length === 2) {
+    [owner, slug] = parts;
+  } else {
     throw new HttpError(400, 'Invalid Kaggle kernel reference.', 'INVALID_KERNEL_REF');
   }
-  return { owner: parts[0], slug: parts[1] };
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(owner) || !/^[a-zA-Z0-9_-]+$/.test(slug)) {
+    throw new HttpError(400, 'Invalid Kaggle kernel reference.', 'INVALID_KERNEL_REF');
+  }
+  return { owner, slug };
 }
 
 function getFetch(options: KaggleClientOptions): typeof fetch {
@@ -243,7 +263,7 @@ export async function pushKernel(
   input: PushKernelInput,
   options: KaggleClientOptions = {},
 ): Promise<PushKernelResult> {
-  const { slug: shortSlug } = splitKernelRef(input.slug);
+  const { owner: inputOwner, slug: shortSlug } = splitKernelRef(input.slug, options.fallbackOwner);
   const fetchFn = getFetch(options);
   const url = `${getBaseUrl(options)}/kernels/push`;
 
@@ -306,11 +326,17 @@ export async function pushKernel(
     );
   }
 
-  const normalizedRef = typeof payload?.ref === 'string'
-    ? payload.ref.trim().replace(/^\/+|\/+$/g, '')
-    : '';
+  let resolvedRef = `${inputOwner}/${shortSlug}`;
+  if (typeof payload?.ref === 'string' && payload.ref.trim()) {
+    try {
+      const parsed = splitKernelRef(payload.ref, inputOwner);
+      resolvedRef = `${parsed.owner}/${parsed.slug}`;
+    } catch {
+      // Keep canonical requested owner/slug when Kaggle omits or formats ref unexpectedly.
+    }
+  }
   return {
-    ref: normalizedRef.includes('/') ? normalizedRef : input.slug,
+    ref: resolvedRef,
     url: typeof payload?.url === 'string' ? payload.url : null,
     versionNumber: typeof payload?.versionNumber === 'number' ? payload.versionNumber : null,
   };
@@ -321,7 +347,7 @@ export async function getKernelStatus(
   kernelRef: string,
   options: KaggleClientOptions = {},
 ): Promise<KernelStatusResult> {
-  const { owner, slug } = splitKernelRef(kernelRef);
+  const { owner, slug } = splitKernelRef(kernelRef, options.fallbackOwner);
   const fetchFn = getFetch(options);
   const url = `${getBaseUrl(options)}/kernels/status?userName=${encodeURIComponent(owner)}&kernelSlug=${encodeURIComponent(slug)}`;
 
@@ -388,12 +414,46 @@ export async function getKernelStatus(
   };
 }
 
+export async function deleteKernel(
+  headers: Record<string, string>,
+  kernelRef: string,
+  options: KaggleClientOptions = {},
+): Promise<DeleteKernelResult> {
+  const { owner, slug } = splitKernelRef(kernelRef, options.fallbackOwner);
+  const fetchFn = getFetch(options);
+  const baseUrl = getBaseUrl(options);
+
+  let response: Response;
+  try {
+    response = await fetchFn(
+      `${baseUrl}/kernels/delete/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          ...headers,
+          Accept: 'application/json',
+        },
+      },
+    );
+  } catch {
+    throw new HttpError(502, 'Could not reach Kaggle API to remove the notebook.', 'KAGGLE_API_UNAVAILABLE');
+  }
+
+  if (response.ok || response.status === 404) {
+    return { deleted: true };
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new HttpError(401, 'Kaggle API credentials were rejected while removing the notebook.', 'KAGGLE_AUTH_REJECTED');
+  }
+  throw new HttpError(502, `Kaggle notebook delete failed with HTTP ${response.status}.`, 'KAGGLE_API_UNAVAILABLE');
+}
+
 export async function cancelKernel(
   headers: Record<string, string>,
   kernelRef: string,
   options: KaggleClientOptions = {},
 ): Promise<CancelKernelResult> {
-  const { owner, slug } = splitKernelRef(kernelRef);
+  const { owner, slug } = splitKernelRef(kernelRef, options.fallbackOwner);
   const fetchFn = getFetch(options);
   const baseUrl = getBaseUrl(options);
 
@@ -417,27 +477,8 @@ export async function cancelKernel(
   }
 
   if (response.status === 404 || response.status === 405) {
-    let deleteResponse: Response;
-    try {
-      deleteResponse = await fetchFn(`${baseUrl}/kernels/delete`, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userName: owner, kernelSlug: slug }),
-      });
-    } catch {
-      throw new HttpError(502, 'Could not reach Kaggle API to remove the notebook.', 'KAGGLE_API_UNAVAILABLE');
-    }
-    if (deleteResponse.ok || deleteResponse.status === 404) {
-      return { cancelled: true, method: 'delete' };
-    }
-    if (deleteResponse.status === 401 || deleteResponse.status === 403) {
-      throw new HttpError(401, 'Kaggle API credentials were rejected while cancelling the notebook.', 'KAGGLE_AUTH_REJECTED');
-    }
-    throw new HttpError(502, `Kaggle notebook delete failed with HTTP ${deleteResponse.status}.`, 'KAGGLE_API_UNAVAILABLE');
+    await deleteKernel(headers, `${owner}/${slug}`, options);
+    return { cancelled: true, method: 'delete' };
   }
 
   if (response.status === 401 || response.status === 403) {
