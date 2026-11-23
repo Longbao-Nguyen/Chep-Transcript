@@ -4,7 +4,16 @@ import { deleteKernel, getKernelStatus } from '../kaggle/client.js';
 import { deleteSourceMedia } from '../storage/job-objects.js';
 
 const TERMINAL_KAGGLE_STATUSES = new Set(['complete', 'error', 'cancelAcknowledged']);
+const ACTIVE_KAGGLE_JOB_STATUSES = new Set<Job['status']>([
+  'WORKER_STARTING',
+  'PROCESSING',
+  'PREPROCESSING',
+  'TRANSCRIBING',
+  'FINALIZING',
+]);
 const FORCE_DELETE_STUCK_CANCEL_MS = 30_000;
+const ACTIVE_FAILURE_CHECK_DELAY_MS = 15_000;
+const COMPLETE_CALLBACK_GRACE_MS = 25_000;
 
 export async function finalizeJobCancellation(
   job: Job,
@@ -41,13 +50,50 @@ export async function finalizeJobCancellation(
   return { status: finalStatus, queueState: nextQueueState };
 }
 
-export async function reconcilePendingCancellationsForUser(
+async function failRemoteStoppedJob(
+  job: Job,
+  userId: string,
+  repositories: Repositories,
+  errorCode: 'FAILED_WORKER_START' | 'FAILED_INFERENCE' | 'FAILED_OUTPUT',
+  errorMessage: string,
+): Promise<void> {
+  let updated: Job | null = null;
+  if (job.workerRunId) {
+    updated = await repositories.jobs.failForWorker(job.id, userId, job.workerRunId, errorCode, errorMessage);
+  }
+  if (!updated) {
+    await repositories.jobs.updateForUser(
+      job.id,
+      userId,
+      {
+        status: errorCode,
+        errorCode,
+        errorMessage,
+        completedAt: new Date(),
+        callbackTokenHash: null,
+        callbackTokenExpiresAt: null,
+      },
+      job.status,
+    );
+  }
+  const queued = await repositories.queue.countQueuedForUser(userId);
+  await repositories.queue.setQueueState(userId, queued > 0 ? 'PAUSED' : 'IDLE');
+}
+
+export async function reconcileUserKaggleJobs(
   userId: string,
   jobs: Job[],
   repositories: Repositories,
 ): Promise<boolean> {
-  const pending = jobs.filter((job) => job.status === 'CANCEL_REQUESTED');
-  if (pending.length === 0) return false;
+  const now = Date.now();
+  const pendingCancels = jobs.filter((job) => job.status === 'CANCEL_REQUESTED');
+  const checkableActive = jobs.filter(
+    (job) =>
+      ACTIVE_KAGGLE_JOB_STATUSES.has(job.status)
+      && Boolean(job.kaggleKernelRef)
+      && now - job.updatedAt.getTime() >= ACTIVE_FAILURE_CHECK_DELAY_MS,
+  );
+  if (pendingCancels.length === 0 && checkableActive.length === 0) return false;
 
   let auth: KaggleAuthContext | null | undefined;
   const loadAuth = async () => {
@@ -61,8 +107,8 @@ export async function reconcilePendingCancellationsForUser(
   };
 
   let changed = false;
-  const now = Date.now();
-  for (const job of pending) {
+
+  for (const job of pendingCancels) {
     const refs = [job.kaggleKernelRef, job.kaggleShard1Ref].filter((ref): ref is string => Boolean(ref));
     if (refs.length === 0) {
       await finalizeJobCancellation(job, userId, repositories);
@@ -80,16 +126,10 @@ export async function reconcilePendingCancellationsForUser(
           const remote = await getKernelStatus(kaggleAuth.headers, ref, {
             fallbackOwner: kaggleAuth.username,
           });
-          if (TERMINAL_KAGGLE_STATUSES.has(remote.status)) {
+          if (TERMINAL_KAGGLE_STATUSES.has(remote.status) || stuckLongEnough) {
             await deleteKernel(kaggleAuth.headers, ref, {
               fallbackOwner: kaggleAuth.username,
             }).catch(() => undefined);
-            return true;
-          }
-          if (stuckLongEnough) {
-            await deleteKernel(kaggleAuth.headers, ref, {
-              fallbackOwner: kaggleAuth.username,
-            });
             return true;
           }
           return false;
@@ -115,5 +155,51 @@ export async function reconcilePendingCancellationsForUser(
     }
   }
 
+  for (const job of checkableActive) {
+    const kaggleAuth = await loadAuth();
+    if (!kaggleAuth || !job.kaggleKernelRef) continue;
+    const refs = [job.kaggleKernelRef, job.kaggleShard1Ref].filter((ref): ref is string => Boolean(ref));
+
+    try {
+      const remote = await getKernelStatus(kaggleAuth.headers, job.kaggleKernelRef, {
+        fallbackOwner: kaggleAuth.username,
+      });
+
+      if (remote.status === 'error' || remote.status === 'cancelAcknowledged') {
+        const errorCode = job.status === 'WORKER_STARTING' ? 'FAILED_WORKER_START' : 'FAILED_INFERENCE';
+        await failRemoteStoppedJob(
+          job,
+          userId,
+          repositories,
+          errorCode,
+          remote.failureMessage || 'Kaggle notebook stopped unexpectedly.',
+        );
+        await Promise.all(
+          refs.map((ref) => deleteKernel(kaggleAuth.headers, ref, { fallbackOwner: kaggleAuth.username }).catch(() => undefined)),
+        );
+        changed = true;
+        continue;
+      }
+
+      if (remote.status === 'complete' && now - job.updatedAt.getTime() >= COMPLETE_CALLBACK_GRACE_MS) {
+        await failRemoteStoppedJob(
+          job,
+          userId,
+          repositories,
+          'FAILED_OUTPUT',
+          'Kaggle notebook finished without uploading the transcript.',
+        );
+        await Promise.all(
+          refs.map((ref) => deleteKernel(kaggleAuth.headers, ref, { fallbackOwner: kaggleAuth.username }).catch(() => undefined)),
+        );
+        changed = true;
+      }
+    } catch {
+      // Transient Kaggle poll errors leave the job active until the next poll cycle.
+    }
+  }
+
   return changed;
 }
+
+export const reconcilePendingCancellationsForUser = reconcileUserKaggleJobs;

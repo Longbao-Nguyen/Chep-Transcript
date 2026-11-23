@@ -36,7 +36,7 @@ export interface BuildTranscriptionNotebookInput {
   span?: [number, number] | null;
 }
 
-function assertHttpUrl(value: string, label: string): string {
+function assertHttpUrl(value: string, label: string, stripTrailingSlash = false): string {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -46,7 +46,12 @@ function assertHttpUrl(value: string, label: string): string {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new HttpError(400, `${label} must use HTTP or HTTPS.`, 'INVALID_NOTEBOOK_CONFIG');
   }
-  return parsed.toString().replace(/\/+$/, '');
+  const formatted = parsed.toString();
+  return stripTrailingSlash ? formatted.replace(/\/+$/, '') : formatted;
+}
+
+function pyJsonLiteral(value: unknown): string {
+  return `json.loads(${JSON.stringify(JSON.stringify(value))})`;
 }
 
 const WORKER_TEMPLATE = `
@@ -120,7 +125,7 @@ def check_cancel():
 
 def install_dependencies():
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "faster-whisper==1.2.1", "ctranslate2==4.8.2", "av"],
+        [sys.executable, "-m", "pip", "install", "-q", "faster-whisper==1.2.1", "ctranslate2==4.8.2"],
         check=True,
     )
 
@@ -412,9 +417,10 @@ export function buildTranscriptionNotebook(input: BuildTranscriptionNotebookInpu
     throw new HttpError(400, 'Job ID, worker run ID, and callback token are required.', 'INVALID_NOTEBOOK_CONFIG');
   }
   const audioUrl = assertHttpUrl(input.audioDownloadUrl, 'audioDownloadUrl');
-  const callbackBase = assertHttpUrl(input.callbackBaseUrl, 'callbackBaseUrl');
+  const callbackBase = assertHttpUrl(input.callbackBaseUrl, 'callbackBaseUrl', true);
 
   const headerLines = [
+    'import json',
     `JOB_ID = ${JSON.stringify(input.jobId)}`,
     `WORKER_RUN_ID = ${JSON.stringify(input.workerRunId)}`,
     `LANGUAGE = ${JSON.stringify(input.language)}`,
@@ -423,14 +429,14 @@ export function buildTranscriptionNotebook(input: BuildTranscriptionNotebookInpu
     `CHUNK_SECONDS = ${JSON.stringify(input.model.chunkSeconds)}`,
     `COMPUTE_TYPE = ${JSON.stringify(input.model.sweetSpot.computeType)}`,
     `CONCURRENCY = ${JSON.stringify(input.model.sweetSpot.concurrency)}`,
-    `TRANSCRIBE_OPTS = ${JSON.stringify(input.model.transcribe)}`,
-    `MODEL_FILES = ${JSON.stringify(input.model.files ?? {})}`,
+    `TRANSCRIBE_OPTS = ${pyJsonLiteral(input.model.transcribe)}`,
+    `MODEL_FILES = ${pyJsonLiteral(input.model.files ?? {})}`,
     `AUDIO_DOWNLOAD_URL = ${JSON.stringify(audioUrl)}`,
     `CALLBACK_BASE_URL = ${JSON.stringify(callbackBase)}`,
     `CALLBACK_TOKEN = ${JSON.stringify(input.callbackToken)}`,
     `DUAL_THRESHOLD_SECONDS = ${JSON.stringify(DUAL_THRESHOLD_SECONDS)}`,
     `SHARD_INDEX = ${input.shardIndex === undefined ? 'None' : String(input.shardIndex)}`,
-    `SPAN = ${input.span ? JSON.stringify(input.span) : 'None'}`,
+    `SPAN = ${input.span ? pyJsonLiteral(input.span) : 'None'}`,
   ].join('\n');
 
   const source = `${headerLines}\n${WORKER_TEMPLATE.trimStart()}`;

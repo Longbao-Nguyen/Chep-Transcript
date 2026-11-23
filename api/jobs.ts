@@ -1,14 +1,14 @@
 import { requireUser } from '../server/auth/session.js';
 import { getRepositories } from '../server/db/index.js';
 import { jsonResponse, route } from '../server/http/responses.js';
-import { reconcilePendingCancellationsForUser } from '../server/jobs/cancel.js';
+import { reconcileUserKaggleJobs } from '../server/jobs/cancel.js';
 import { toClientJob } from '../server/jobs/public.js';
 
 export const GET = route(async (request) => {
   const user = await requireUser(request);
   const repositories = await getRepositories();
   let jobs = await repositories.jobs.listForUser(user.id, { activeAndRecent: true, limit: 100 });
-  const reconciled = await reconcilePendingCancellationsForUser(user.id, jobs, repositories).catch(() => false);
+  const reconciled = await reconcileUserKaggleJobs(user.id, jobs, repositories).catch(() => false);
   if (reconciled) {
     jobs = await repositories.jobs.listForUser(user.id, { activeAndRecent: true, limit: 100 });
   }
