@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { buildTranscriptionNotebook } from '../../server/kaggle/notebook-builder';
+import { resolveCallbackBaseUrl } from '../../server/jobs/dispatcher';
 import { resolveModelAndLanguage, toNotebookModelConfig } from '../../server/models/catalog';
 
 test('buildTranscriptionNotebook emits valid Python syntax without raw JS booleans and preserves signed URL queries', () => {
@@ -53,5 +54,42 @@ test('buildTranscriptionNotebook emits valid Python syntax without raw JS boolea
 
   if (!pythonCheck.error) {
     assert.equal(pythonCheck.status, 0, pythonCheck.stderr || pythonCheck.stdout);
+  }
+});
+
+test('resolveCallbackBaseUrl ignores stale *.vercel.app APP_BASE_URL on Vercel while keeping custom domains and local URLs', () => {
+  const prevVercel = process.env.VERCEL;
+  const prevProdUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const prevAppBase = process.env.APP_BASE_URL;
+
+  try {
+    process.env.VERCEL = '1';
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'chep-transcript.vercel.app';
+    process.env.APP_BASE_URL = 'https://french-transcript.vercel.app';
+    assert.equal(
+      resolveCallbackBaseUrl('https://chep-transcript.vercel.app/api/queue/start'),
+      'https://chep-transcript.vercel.app',
+    );
+
+    process.env.APP_BASE_URL = 'https://chep.example.com/';
+    assert.equal(
+      resolveCallbackBaseUrl('https://chep-transcript.vercel.app/api/queue/start'),
+      'https://chep.example.com',
+    );
+
+    delete process.env.VERCEL;
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    process.env.APP_BASE_URL = 'http://localhost:3000';
+    assert.equal(
+      resolveCallbackBaseUrl('http://localhost:5173/api/queue/start'),
+      'http://localhost:3000',
+    );
+  } finally {
+    if (prevVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = prevVercel;
+    if (prevProdUrl === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    else process.env.VERCEL_PROJECT_PRODUCTION_URL = prevProdUrl;
+    if (prevAppBase === undefined) delete process.env.APP_BASE_URL;
+    else process.env.APP_BASE_URL = prevAppBase;
   }
 });

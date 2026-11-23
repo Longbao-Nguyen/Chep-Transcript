@@ -40,23 +40,30 @@ export interface DispatchResult {
 export function resolveCallbackBaseUrl(requestUrl: string): string {
   const configured = process.env.APP_BASE_URL?.trim();
   const isVercel = Boolean(process.env.VERCEL);
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ?.trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '');
+
   if (configured) {
     try {
       const parsed = new URL(configured);
       const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-      if (!(isVercel && isLocalHost)) {
+      const isStaleVercelHost = Boolean(
+        isVercel
+        && productionHost
+        && parsed.hostname.endsWith('.vercel.app')
+        && parsed.hostname !== productionHost,
+      );
+      if (!(isVercel && isLocalHost) && !isStaleVercelHost) {
         return parsed.toString().replace(/\/+$/, '');
       }
     } catch {
       // Ignore malformed APP_BASE_URL and fall back to runtime origin.
     }
   }
-  if (isVercel && process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()) {
-    const host = process.env.VERCEL_PROJECT_PRODUCTION_URL
-      .trim()
-      .replace(/^https?:\/\//i, '')
-      .replace(/\/+$/, '');
-    return `https://${host}`;
+  if (isVercel && productionHost) {
+    return `https://${productionHost}`;
   }
   return new URL(requestUrl).origin.replace(/\/+$/, '');
 }
