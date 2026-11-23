@@ -5,8 +5,6 @@ import type { TranscriptionModelSummary } from '../../../shared/models';
 import type { AppSession } from '../../types';
 import { resetSession, signInWithGoogle, signOut } from './authActions';
 
-export type ComputeBackend = 'kaggle' | 'colab';
-
 export function AppHeader({
   user,
   page,
@@ -14,8 +12,6 @@ export function AppHeader({
   models,
   selectedLanguage = 'fr',
   onSelectLanguage,
-  computeBackend = 'kaggle',
-  onSelectBackend,
 }: {
   user: AppSession['user'];
   page: string;
@@ -23,8 +19,6 @@ export function AppHeader({
   models: TranscriptionModelSummary[];
   selectedLanguage?: string;
   onSelectLanguage?: (language: string) => void;
-  computeBackend?: ComputeBackend;
-  onSelectBackend?: (backend: ComputeBackend) => void;
 }) {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(
     () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('model_open') === '1',
@@ -124,37 +118,6 @@ export function AppHeader({
                 </div>
               </div>
             )}
-          </div>
-
-          <div
-            role="group"
-            aria-label="Compute backend"
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 shadow-sm"
-          >
-            <button
-              type="button"
-              aria-pressed={computeBackend === 'kaggle'}
-              onClick={() => onSelectBackend?.('kaggle')}
-              className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                computeBackend === 'kaggle'
-                  ? 'bg-white font-semibold text-emerald-900 shadow-sm'
-                  : 'font-medium text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Kaggle
-            </button>
-            <button
-              type="button"
-              aria-pressed={computeBackend === 'colab'}
-              onClick={() => onSelectBackend?.('colab')}
-              className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
-                computeBackend === 'colab'
-                  ? 'bg-white font-semibold text-emerald-900 shadow-sm'
-                  : 'font-medium text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Colab
-            </button>
           </div>
 
           <button

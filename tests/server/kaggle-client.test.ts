@@ -98,32 +98,34 @@ test('pushKernel, getKernelStatus, and cancelKernel interact with Kaggle API pay
 
   const cancelled = await cancelKernel({ Authorization: 'Bearer KGAT_1234567890abcdef' }, 'alice/chep-job-1', {
     fetchFn: async (url, init) => {
-      if (String(url).endsWith('/kernels/cancel')) {
-        return new Response('Method Not Allowed', { status: 405 });
-      }
-      assert.equal(String(url), 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-job-1');
-      assert.equal(init?.method, 'DELETE');
+      assert.equal(String(url), 'https://api.kaggle.com/v1/kernels.KernelsApiService/DeleteKernel');
+      assert.equal(init?.method, 'POST');
+      assert.deepEqual(JSON.parse(String(init?.body)), { userName: 'alice', kernelSlug: 'chep-job-1' });
       return Response.json({ ok: true });
     },
   });
   assert.deepEqual(cancelled, { cancelled: true, method: 'delete' });
 });
 
-test('deleteKernel calls DELETE /kernels/delete/{owner}/{slug} and handles 200 and 404', async () => {
-  const seenCalls: Array<{ url: string; method?: string }> = [];
+test('deleteKernel calls POST DeleteKernel RPC and handles 200 and 404', async () => {
+  const seenCalls: Array<{ url: string; method?: string; body: unknown }> = [];
   const deletedOk = await deleteKernel(
     { Authorization: 'Bearer KGAT_1234567890abcdef' },
     '/code/alice/chep-gpu-check-1',
     {
       fetchFn: async (url, init) => {
-        seenCalls.push({ url: String(url), method: init?.method });
-        return Response.json({ deleted: true });
+        seenCalls.push({ url: String(url), method: init?.method, body: JSON.parse(String(init?.body)) });
+        return Response.json({});
       },
     },
   );
   assert.deepEqual(deletedOk, { deleted: true });
   assert.deepEqual(seenCalls, [
-    { url: 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-gpu-check-1', method: 'DELETE' },
+    {
+      url: 'https://api.kaggle.com/v1/kernels.KernelsApiService/DeleteKernel',
+      method: 'POST',
+      body: { userName: 'alice', kernelSlug: 'chep-gpu-check-1' },
+    },
   ]);
 
   const deletedMissing = await deleteKernel(
@@ -132,8 +134,12 @@ test('deleteKernel calls DELETE /kernels/delete/{owner}/{slug} and handles 200 a
     {
       fallbackOwner: 'alice',
       fetchFn: async (url, init) => {
-        assert.equal(String(url), 'https://www.kaggle.com/api/v1/kernels/delete/alice/chep-gpu-check-missing');
-        assert.equal(init?.method, 'DELETE');
+        assert.equal(String(url), 'https://api.kaggle.com/v1/kernels.KernelsApiService/DeleteKernel');
+        assert.equal(init?.method, 'POST');
+        assert.deepEqual(JSON.parse(String(init?.body)), {
+          userName: 'alice',
+          kernelSlug: 'chep-gpu-check-missing',
+        });
         return new Response('Not Found', { status: 404 });
       },
     },

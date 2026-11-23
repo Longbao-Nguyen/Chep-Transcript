@@ -1,0 +1,119 @@
+import type { Job, QueueState, Repositories } from '../db/interface.js';
+import { getKaggleAuthContextForUser, type KaggleAuthContext } from '../kaggle/auth.js';
+import { deleteKernel, getKernelStatus } from '../kaggle/client.js';
+import { deleteSourceMedia } from '../storage/job-objects.js';
+
+const TERMINAL_KAGGLE_STATUSES = new Set(['complete', 'error', 'cancelAcknowledged']);
+const FORCE_DELETE_STUCK_CANCEL_MS = 30_000;
+
+export async function finalizeJobCancellation(
+  job: Job,
+  userId: string,
+  repositories: Repositories,
+): Promise<{ status: Job['status']; queueState: QueueState }> {
+  if (job.workerRunId) {
+    await repositories.jobs.acknowledgeCancellation(job.id, userId, job.workerRunId);
+  }
+  const latest = await repositories.jobs.getByIdForUser(job.id, userId);
+  let finalStatus: Job['status'] = latest?.status ?? job.status;
+  if (finalStatus === 'CANCEL_REQUESTED') {
+    const updated = await repositories.jobs.updateForUser(
+      job.id,
+      userId,
+      {
+        status: 'CANCELLED',
+        completedAt: new Date(),
+        callbackTokenHash: null,
+        callbackTokenExpiresAt: null,
+      },
+      'CANCEL_REQUESTED',
+    );
+    if (updated) {
+      finalStatus = updated.status;
+    }
+  }
+
+  const queued = await repositories.queue.countQueuedForUser(userId);
+  const nextQueueState: QueueState = queued > 0 ? 'PAUSED' : 'IDLE';
+  await repositories.queue.setQueueState(userId, nextQueueState);
+  await deleteSourceMedia(latest ?? job).catch(() => undefined);
+
+  return { status: finalStatus, queueState: nextQueueState };
+}
+
+export async function reconcilePendingCancellationsForUser(
+  userId: string,
+  jobs: Job[],
+  repositories: Repositories,
+): Promise<boolean> {
+  const pending = jobs.filter((job) => job.status === 'CANCEL_REQUESTED');
+  if (pending.length === 0) return false;
+
+  let auth: KaggleAuthContext | null | undefined;
+  const loadAuth = async () => {
+    if (auth !== undefined) return auth;
+    try {
+      auth = await getKaggleAuthContextForUser(userId, repositories);
+    } catch {
+      auth = null;
+    }
+    return auth;
+  };
+
+  let changed = false;
+  const now = Date.now();
+  for (const job of pending) {
+    const refs = [job.kaggleKernelRef, job.kaggleShard1Ref].filter((ref): ref is string => Boolean(ref));
+    if (refs.length === 0) {
+      await finalizeJobCancellation(job, userId, repositories);
+      changed = true;
+      continue;
+    }
+
+    const kaggleAuth = await loadAuth();
+    if (!kaggleAuth) continue;
+
+    const stuckLongEnough = now - job.updatedAt.getTime() >= FORCE_DELETE_STUCK_CANCEL_MS;
+    const outcomes = await Promise.all(
+      refs.map(async (ref) => {
+        try {
+          const remote = await getKernelStatus(kaggleAuth.headers, ref, {
+            fallbackOwner: kaggleAuth.username,
+          });
+          if (TERMINAL_KAGGLE_STATUSES.has(remote.status)) {
+            await deleteKernel(kaggleAuth.headers, ref, {
+              fallbackOwner: kaggleAuth.username,
+            }).catch(() => undefined);
+            return true;
+          }
+          if (stuckLongEnough) {
+            await deleteKernel(kaggleAuth.headers, ref, {
+              fallbackOwner: kaggleAuth.username,
+            });
+            return true;
+          }
+          return false;
+        } catch {
+          if (stuckLongEnough) {
+            try {
+              await deleteKernel(kaggleAuth.headers, ref, {
+                fallbackOwner: kaggleAuth.username,
+              });
+              return true;
+            } catch {
+              return false;
+            }
+          }
+          return false;
+        }
+      }),
+    );
+
+    if (outcomes.every(Boolean)) {
+      await finalizeJobCancellation(job, userId, repositories);
+      changed = true;
+    }
+  }
+
+  return changed;
+}

@@ -2,9 +2,10 @@ import { requireUser } from '../../../server/auth/session.js';
 import { getRepositories } from '../../../server/db/index.js';
 import type { JobStatus } from '../../../server/db/interface.js';
 import { HttpError, extractPathId, jsonResponse, route } from '../../../server/http/responses.js';
+import { finalizeJobCancellation } from '../../../server/jobs/cancel.js';
 import { toClientJob } from '../../../server/jobs/public.js';
 import { getKaggleAuthContextForUser } from '../../../server/kaggle/auth.js';
-import { cancelKernel } from '../../../server/kaggle/client.js';
+import { deleteKernel } from '../../../server/kaggle/client.js';
 import { attachmentContentDisposition, createDownloadFilename } from '../../../server/storage/downloads.js';
 import { getObjectStorage } from '../../../server/storage/index.js';
 import { deleteSourceMedia } from '../../../server/storage/job-objects.js';
@@ -61,16 +62,34 @@ export const POST = route(async (request) => {
     if (result.job.status === 'CANCELLED') {
       await deleteSourceMedia(result.job);
     } else if (result.job.status === 'CANCEL_REQUESTED') {
+      let allStopped = false;
       const refs = [result.job.kaggleKernelRef, result.job.kaggleShard1Ref].filter(
         (ref): ref is string => Boolean(ref),
       );
-      if (refs.length > 0) {
+      if (refs.length === 0) {
+        allStopped = true;
+      } else {
         try {
           const auth = await getKaggleAuthContextForUser(user.id, repositories);
-          await Promise.all(refs.map((ref) => cancelKernel(auth.headers, ref).catch(() => undefined)));
+          const outcomes = await Promise.all(
+            refs.map(async (ref) => {
+              try {
+                await deleteKernel(auth.headers, ref, { fallbackOwner: auth.username });
+                return true;
+              } catch {
+                return false;
+              }
+            }),
+          );
+          allStopped = outcomes.every(Boolean);
         } catch {
           // Durable cancellation state remains recorded even if remote stop cannot be reached immediately.
         }
+      }
+
+      if (allStopped) {
+        const finalized = await finalizeJobCancellation(result.job, user.id, repositories);
+        return jsonResponse({ jobId, status: finalized.status, queueState: finalized.queueState });
       }
     }
     return jsonResponse({ jobId, status: result.job.status, queueState: result.queueState });

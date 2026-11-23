@@ -196,12 +196,9 @@ try {
   await page.getByRole('option', { name: /French/ }).click();
   await page.getByRole('button', { name: /Model:\s*French/ }).waitFor();
 
-  // Verify Kaggle / Colab toggle in top header switches left connection panel
-  const backendGroup = page.getByRole('group', { name: 'Compute backend' });
-  await backendGroup.getByRole('button', { name: 'Colab', exact: true }).click();
-  await page.getByRole('heading', { name: 'Colab connection' }).waitFor();
-  await backendGroup.getByRole('button', { name: 'Kaggle', exact: true }).click();
-  await page.getByText('Connect with Kaggle API Token').waitFor();
+  // Verify Colab toggle and Refresh status button are absent
+  assert.equal(await page.getByRole('group', { name: 'Compute backend' }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Refresh status', exact: true }).count(), 0);
 
   // Verify Kaggle token connect & disconnect fixture flow
   await page.getByLabel('Kaggle API Token *').fill('KGAT_fixture_token_123456');
@@ -268,13 +265,9 @@ try {
   await page.screenshot({ path: path.join(output, 'guide-mobile.png'), fullPage: true });
   await page.keyboard.press('Escape');
 
-  failStatus = true;
   await page.getByRole('button', { name: 'Kaggle connection Show setup' }).click();
-  await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'Could not check Kaggle connection status.' }).waitFor();
-  failStatus = false;
-  await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
   await page.getByText('Connect your Kaggle API token to run transcription on Kaggle T4 GPUs.').waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Refresh status', exact: true }).count(), 0);
   assert.equal(forbiddenCalls, 0, 'Disabled GPU controls must not launch work.');
   assert.deepEqual(errors, []);
   console.log('UI_SMOKE_OK: navigation, Kaggle token connect/disconnect, model selector, guide focus/Escape, download/error, upload error, remove, cancel, pause, mobile, status retry; fixtures only.');

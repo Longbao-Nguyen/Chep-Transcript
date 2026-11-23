@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { CheckCircle2, Cpu, ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, Unplug } from 'lucide-react';
+import { CheckCircle2, Cpu, ExternalLink, Eye, EyeOff, KeyRound, ShieldCheck, Unplug } from 'lucide-react';
 import type { ConnectKaggleInput, KaggleStatus } from './useKaggleStatus';
 
 export function KaggleConnection({
@@ -7,7 +7,6 @@ export function KaggleConnection({
   loading,
   submitting,
   error,
-  onRefresh,
   onConnect,
   onCheckGpu,
   onDisconnect,
@@ -16,7 +15,6 @@ export function KaggleConnection({
   loading: boolean;
   submitting: boolean;
   error: string | null;
-  onRefresh: () => void;
   onConnect: (input: ConnectKaggleInput) => Promise<unknown>;
   onCheckGpu?: () => Promise<unknown>;
   onDisconnect: () => Promise<unknown>;
@@ -121,14 +119,6 @@ export function KaggleConnection({
             >
               <Unplug size={13} /> {submitting ? 'Disconnecting…' : 'Disconnect Kaggle'}
             </button>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={loading || submitting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100 hover:bg-white/10 disabled:opacity-60"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh status
-            </button>
           </div>
         </div>
       ) : (
@@ -219,14 +209,6 @@ export function KaggleConnection({
               <span>Get token in Kaggle settings</span>
               <ExternalLink size={13} className="text-emerald-300" />
             </a>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={loading || submitting}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/15 px-3.5 py-2 text-xs text-emerald-100 hover:bg-white/10 disabled:opacity-60"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh status
-            </button>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ACTIVE_JOB_STATUSES, type ClientJob, type JobStatus, type QueueState } from '../../types';
 
@@ -24,6 +24,7 @@ export function useJobsPolling(enabled: boolean) {
   const [pauseAfterCurrent, setPauseAfterCurrent] = useState(false);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
+  const pollInFlightRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!enabled) return;
@@ -80,8 +81,19 @@ export function useJobsPolling(enabled: boolean) {
   const delay = useMemo(() => getPollingDelay(jobs), [jobs]);
   useEffect(() => {
     if (!enabled || delay == null) return;
-    const timer = window.setTimeout(() => void refresh(), delay);
-    return () => window.clearTimeout(timer);
+    const poll = async () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      try {
+        await refresh();
+      } finally {
+        pollInFlightRef.current = false;
+      }
+    };
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, delay);
+    return () => window.clearInterval(intervalId);
   }, [delay, enabled, refresh]);
 
   return { jobs, queueState, queuedCount, pauseAfterCurrent, loading, error, refresh };
