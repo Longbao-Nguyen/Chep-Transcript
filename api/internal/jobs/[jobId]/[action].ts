@@ -4,7 +4,7 @@ import { HttpError, jsonResponse, readJson, route } from '../../../../server/htt
 import { dispatchNextQueuedJob, resolveCallbackBaseUrl } from '../../../../server/jobs/dispatcher.js';
 import { assertJobTransition } from '../../../../server/jobs/state.js';
 import { getKaggleAuthContextForUser } from '../../../../server/kaggle/auth.js';
-import { pushKernel } from '../../../../server/kaggle/client.js';
+import { deleteKernel, pushKernel } from '../../../../server/kaggle/client.js';
 import {
   DUAL_THRESHOLD_SECONDS,
   formatTranscripts,
@@ -72,6 +72,23 @@ async function readStoredJson<T>(storage: ObjectStorage, pathname: string): Prom
     await reader.cancel().catch(() => undefined);
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+}
+
+async function cleanupFinishedKaggleKernels(
+  job: { kaggleKernelRef: string | null; kaggleShard1Ref: string | null },
+  userId: string,
+  repositories: Repositories,
+): Promise<void> {
+  const refs = [job.kaggleKernelRef, job.kaggleShard1Ref].filter((ref): ref is string => Boolean(ref));
+  if (refs.length === 0) return;
+  try {
+    const auth = await getKaggleAuthContextForUser(userId, repositories);
+    await Promise.all(
+      refs.map((ref) => deleteKernel(auth.headers, ref, { fallbackOwner: auth.username }).catch(() => undefined)),
+    );
+  } catch {
+    // Kernel cleanup is best-effort after durable job state transition.
+  }
 }
 
 async function advanceQueueIfStillRunning(
@@ -374,6 +391,7 @@ export const POST = route(async (request) => {
     }
 
     await deleteSourceMedia(completed, storage).catch(() => undefined);
+    await cleanupFinishedKaggleKernels(completed, job.userId, repositories);
     await advanceQueueIfStillRunning(job.userId, request, repositories, storage);
     return jsonResponse({ jobId: completed.id, status: completed.status });
   }
@@ -405,7 +423,7 @@ export const POST = route(async (request) => {
     if (!failed) {
       throw new HttpError(409, 'Job could not be marked failed in its current state.', 'INVALID_JOB_STATE');
     }
-    await deleteSourceMedia(failed).catch(() => undefined);
+    await cleanupFinishedKaggleKernels(failed, job.userId, repositories);
     return jsonResponse({ jobId: failed.id, status: failed.status });
   }
 

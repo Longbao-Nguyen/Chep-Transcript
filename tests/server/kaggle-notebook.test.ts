@@ -31,6 +31,8 @@ test('buildTranscriptionNotebook emits valid Python syntax without raw JS boolea
   assert.equal(source.includes(`AUDIO_DOWNLOAD_URL = ${JSON.stringify(signedAudioUrl)}`), true);
   assert.equal(source.includes('CALLBACK_BASE_URL = "https://chep.example.com"'), true);
   assert.equal(source.includes('"av"'), false);
+  assert.equal(source.includes('preload_cuda_libs'), true);
+  assert.equal(source.includes('RTLD_GLOBAL'), true);
 
   const pythonCheck = spawnSync(
     'python',

@@ -55,11 +55,13 @@ function pyJsonLiteral(value: unknown): string {
 }
 
 const WORKER_TEMPLATE = `
+import ctypes
 import hashlib
 import json
 import math
 import os
 import shutil
+import site
 import subprocess
 import sys
 import urllib.error
@@ -70,6 +72,76 @@ from pathlib import Path
 
 os.environ["HF_HUB_DISABLE_XET"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+CUDA_LIB_NAMES = (
+    "libcublasLt.so.12",
+    "libcublas.so.12",
+    "libcudnn.so.9",
+    "libcudnn_ops.so.9",
+    "libcudnn_cnn.so.9",
+)
+
+
+def _find_cuda_libs():
+    search_roots = []
+    candidate_bases = [*site.getsitepackages(), site.getusersitepackages(), *sys.path]
+    for root in candidate_bases:
+        if not root:
+            continue
+        base = Path(root)
+        nvidia_dir = base / "nvidia"
+        if nvidia_dir.is_dir():
+            for lib_dir in nvidia_dir.glob("*/lib"):
+                if lib_dir.is_dir():
+                    search_roots.append(lib_dir)
+        torch_lib = base / "torch" / "lib"
+        if torch_lib.is_dir():
+            search_roots.append(torch_lib)
+    for sys_dir in (
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda/targets/x86_64-linux/lib",
+        "/usr/local/cuda-12/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+    ):
+        path = Path(sys_dir)
+        if path.is_dir():
+            search_roots.append(path)
+
+    found = {}
+    lib_dirs = []
+    for directory in search_roots:
+        for name in CUDA_LIB_NAMES:
+            candidate = directory / name
+            if name not in found and candidate.exists():
+                found[name] = candidate
+                dir_str = str(directory)
+                if dir_str not in lib_dirs:
+                    lib_dirs.append(dir_str)
+    return found, lib_dirs
+
+
+def preload_cuda_libs():
+    found, lib_dirs = _find_cuda_libs()
+    if "libcublas.so.12" not in found:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "nvidia-cublas-cu12", "nvidia-cudnn-cu12"],
+            check=True,
+        )
+        found, lib_dirs = _find_cuda_libs()
+
+    if lib_dirs:
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        combined = lib_dirs + ([existing] if existing else [])
+        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(combined)
+
+    for name in CUDA_LIB_NAMES:
+        lib_path = found.get(name)
+        if lib_path is not None:
+            try:
+                ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+            except OSError as exc:
+                if name == "libcublas.so.12":
+                    raise RuntimeError(f"Failed to preload {lib_path}: {exc}") from exc
 
 
 class CancelledByUser(Exception):
@@ -256,6 +328,7 @@ def main():
         )
 
         import numpy as np
+        preload_cuda_libs()
         from faster_whisper import WhisperModel
 
         callback_request(
