@@ -1,7 +1,7 @@
 import { requireUser } from '../../server/auth/session.js';
 import { getRepositories } from '../../server/db/index.js';
 import { HttpError, jsonResponse, readJson, route } from '../../server/http/responses.js';
-import { dispatchNextQueuedJob } from '../../server/jobs/dispatcher.js';
+import { dispatchNextQueuedJob, resolveCallbackBaseUrl } from '../../server/jobs/dispatcher.js';
 import { getObjectStorage } from '../../server/storage/index.js';
 
 export const POST = route(async (request) => {
@@ -16,13 +16,21 @@ export const POST = route(async (request) => {
   if (state === 'RUNNING') throw new HttpError(409, 'Queue is already running.', 'QUEUE_RUNNING');
   if (count === 0) throw new HttpError(409, 'No queued jobs remain.', 'QUEUE_EMPTY');
 
-  const callbackBaseUrl = (process.env.APP_BASE_URL || new URL(request.url).origin).replace(/\/+$/, '');
+  const callbackBaseUrl = resolveCallbackBaseUrl(request.url);
   const result = await dispatchNextQueuedJob({
     userId: user.id,
     repositories,
     storage: getObjectStorage(),
     callbackBaseUrl,
   });
+
+  if (result) {
+    console.info('kaggle_job_dispatched', {
+      jobId: result.jobId,
+      kernelRef: result.kernelRef,
+      callbackBaseUrl,
+    });
+  }
 
   return jsonResponse({
     ...result,

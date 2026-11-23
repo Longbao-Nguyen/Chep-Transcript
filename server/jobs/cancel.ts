@@ -167,6 +167,13 @@ export async function reconcileUserKaggleJobs(
 
       if (remote.status === 'error' || remote.status === 'cancelAcknowledged') {
         const errorCode = job.status === 'WORKER_STARTING' ? 'FAILED_WORKER_START' : 'FAILED_INFERENCE';
+        console.warn('kaggle_job_reconciled_failed', {
+          jobId: job.id,
+          kernelRef: job.kaggleKernelRef,
+          jobStatus: job.status,
+          remoteStatus: remote.status,
+          failureMessage: remote.failureMessage,
+        });
         await failRemoteStoppedJob(
           job,
           userId,
@@ -182,6 +189,13 @@ export async function reconcileUserKaggleJobs(
       }
 
       if (remote.status === 'complete' && now - job.updatedAt.getTime() >= COMPLETE_CALLBACK_GRACE_MS) {
+        console.warn('kaggle_job_reconciled_failed', {
+          jobId: job.id,
+          kernelRef: job.kaggleKernelRef,
+          jobStatus: job.status,
+          remoteStatus: remote.status,
+          failureMessage: remote.failureMessage,
+        });
         await failRemoteStoppedJob(
           job,
           userId,

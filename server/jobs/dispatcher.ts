@@ -37,6 +37,30 @@ export interface DispatchResult {
   status: Job['status'];
 }
 
+export function resolveCallbackBaseUrl(requestUrl: string): string {
+  const configured = process.env.APP_BASE_URL?.trim();
+  const isVercel = Boolean(process.env.VERCEL);
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      if (!(isVercel && isLocalHost)) {
+        return parsed.toString().replace(/\/+$/, '');
+      }
+    } catch {
+      // Ignore malformed APP_BASE_URL and fall back to runtime origin.
+    }
+  }
+  if (isVercel && process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()) {
+    const host = process.env.VERCEL_PROJECT_PRODUCTION_URL
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
+    return `https://${host}`;
+  }
+  return new URL(requestUrl).origin.replace(/\/+$/, '');
+}
+
 export async function dispatchClaimedJob(input: DispatchClaimedJobInput): Promise<DispatchResult> {
   const { job, userId, workerRunId, auth, repositories, storage, callbackBaseUrl, fetchFn } = input;
   if (!auth.username) {

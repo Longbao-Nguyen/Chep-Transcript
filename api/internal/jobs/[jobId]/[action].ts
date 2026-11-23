@@ -1,7 +1,7 @@
 import { getRepositories } from '../../../../server/db/index.js';
 import type { JobStatus, Repositories } from '../../../../server/db/interface.js';
 import { HttpError, jsonResponse, readJson, route } from '../../../../server/http/responses.js';
-import { dispatchNextQueuedJob } from '../../../../server/jobs/dispatcher.js';
+import { dispatchNextQueuedJob, resolveCallbackBaseUrl } from '../../../../server/jobs/dispatcher.js';
 import { assertJobTransition } from '../../../../server/jobs/state.js';
 import { getKaggleAuthContextForUser } from '../../../../server/kaggle/auth.js';
 import { pushKernel } from '../../../../server/kaggle/client.js';
@@ -82,7 +82,7 @@ async function advanceQueueIfStillRunning(
 ): Promise<void> {
   const queueState = await repositories.queue.getStateForUser(userId);
   if (queueState !== 'RUNNING') return;
-  const callbackBaseUrl = (process.env.APP_BASE_URL || new URL(request.url).origin).replace(/\/+$/, '');
+  const callbackBaseUrl = resolveCallbackBaseUrl(request.url);
   await dispatchNextQueuedJob({
     userId,
     repositories,
@@ -388,6 +388,12 @@ export const POST = route(async (request) => {
       typeof body.errorMessage === 'string' && body.errorMessage.trim()
         ? body.errorMessage.trim().slice(0, 500)
         : 'Transcription failed on the Kaggle worker.';
+
+    console.warn('kaggle_worker_reported_fail', {
+      jobId: job.id,
+      errorCode,
+      errorMessage,
+    });
 
     const failed = await repositories.jobs.failForWorker(
       job.id,
